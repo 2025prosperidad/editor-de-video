@@ -364,10 +364,27 @@ function cutForWord(i){
 }
 
 // ---- PAUSAS / SILENCIOS como cortes (id = índice de la palabra siguiente al hueco) ----
-const GAP_KEEP = 0.12;          // segundos de silencio que se DEJAN a cada lado
+const GAP_KEEP = 0.10;          // segundos de silencio que se DEJAN a cada lado
 const gapSet = new Set();        // pausas marcadas para recortar
 const gapCut = {};               // ajustes manuales de pausas
+// el silencio REAL (silencedetect) que más se solapa con el hueco entre las palabras
+function silenceInGap(i){
+  const a=WORDS[i-1].e, b=WORDS[i].s;
+  let best=null, bestOv=0.04;
+  for(const s of SILENCES){
+    const ov=Math.min(b,s[1])-Math.max(a,s[0]);   // solapamiento con el hueco
+    if(ov>bestOv){ bestOv=ov; best=s; }
+  }
+  return best;
+}
 function gapDefault(i){
+  // pegar el corte al SILENCIO real, no a los límites de palabra (que llevan audio)
+  const sil=silenceInGap(i);
+  if(sil){
+    let s=sil[0]+GAP_KEEP, e=sil[1]-GAP_KEEP;
+    if(e<=s){ const m=(sil[0]+sil[1])/2; s=m-0.04; e=m+0.04; }
+    return {s,e};
+  }
   let s=WORDS[i-1].e+GAP_KEEP, e=WORDS[i].s-GAP_KEEP;
   if(e<=s){ const m=(WORDS[i-1].e+WORDS[i].s)/2; s=m-0.03; e=m+0.03; }
   return {s,e};
