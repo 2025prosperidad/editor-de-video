@@ -99,6 +99,7 @@ HTML = r"""<!DOCTYPE html>
         color:var(--txt);transition:background .12s,color .12s}
   .word:hover{background:rgba(99,102,241,.22)}
   .word.active{background:var(--accent);color:#fff;font-weight:600}
+  .word.sel{outline:2px solid var(--pause);outline-offset:1px;border-radius:3px}
   .word.spoken{color:#f0f0f7}
   /* categorias muletilla */
   .word.strong{color:var(--strong);text-decoration:underline wavy var(--strong) 1.5px;text-underline-offset:3px}
@@ -165,6 +166,31 @@ HTML = r"""<!DOCTYPE html>
   mark{background:var(--accent);color:#fff;border-radius:3px}
   .legend{display:flex;gap:14px;font-size:11px;color:var(--txt-dim);flex-wrap:wrap}
   .legend i{font-style:normal;border-bottom:2px solid;padding-bottom:1px}
+  /* inspector / waveform */
+  #inspector{background:var(--panel2)}
+  .insword{font-size:15px;color:#fff;margin-bottom:8px}
+  .insword b{color:var(--strong)}
+  #wave{width:100%;height:74px;background:#0b0b12;border:1px solid var(--line);
+        border-radius:6px;display:block;cursor:ew-resize;touch-action:none}
+  .instimes{font-family:'SF Mono',Menlo,monospace;font-size:11px;color:var(--txt-dim);
+            margin:8px 0;text-align:center}
+  .instimes b{color:var(--pause)}
+  .insrow{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--txt-dim)}
+  .insrow .nb{padding:4px 9px;background:var(--panel);border:1px solid var(--line);
+              border-radius:5px;color:var(--txt);font-size:13px;font-weight:700;min-width:30px}
+  .insrow .nb:hover{border-color:var(--accent)}
+  .insrow .grow{flex:1}
+  .ins-act{display:flex;gap:6px;margin-top:8px}
+  .ins-act button{flex:1;font-size:12px;padding:7px 6px}
+  .b-mark{background:var(--del)}.b-mark.on{background:#3a3a48}
+  .b-same{background:var(--panel)}.b-same:hover{filter:brightness(1.3)}
+  /* lista de eliminadas */
+  .rm{display:flex;align-items:baseline;gap:8px;padding:6px 16px;border-bottom:1px solid var(--panel2);
+      cursor:pointer;font-size:13px}
+  .rm:hover{background:var(--panel2)}
+  .rm .tm{font-family:'SF Mono',Menlo,monospace;font-size:11px;color:var(--txt-dim);width:42px;flex-shrink:0}
+  .rm .w{flex:1;color:var(--del);text-decoration:line-through}
+  .rm .x{opacity:.5}.rm:hover .x{opacity:1}
 </style>
 </head>
 <body>
@@ -197,6 +223,27 @@ HTML = r"""<!DOCTYPE html>
 
   <!-- SIDEBAR -->
   <div class="sidebar">
+    <div class="side-sec" id="inspector" style="display:none">
+      <h3>Ajustar corte (como Descript)</h3>
+      <div class="insword" id="insWord"></div>
+      <canvas id="wave" width="288" height="74"></canvas>
+      <div class="instimes"><b id="insStart">0:00.00</b> → <b id="insEnd">0:00.00</b> &nbsp;(<span id="insDur">0.0s</span>)</div>
+      <div class="insrow"><span class="grow">Inicio</span>
+        <button class="nb" onclick="nudge('s',-1)" title="más atrás">◀</button>
+        <button class="nb" onclick="nudge('s',1)" title="más adelante">▶</button>
+      </div>
+      <div class="insrow"><span class="grow">Fin</span>
+        <button class="nb" onclick="nudge('e',-1)" title="más atrás">◀</button>
+        <button class="nb" onclick="nudge('e',1)" title="más adelante">▶</button>
+      </div>
+      <div class="ins-act">
+        <button class="b-mark" id="insMark" onclick="toggleSelDel()">Eliminar</button>
+        <button class="b-same" id="insSame" onclick="markAllSame()">Marcar todas</button>
+      </div>
+      <div class="insrow" style="justify-content:center">
+        <button class="nb" style="font-size:11px;font-weight:500" onclick="playSel()">▶ escuchar el corte</button>
+      </div>
+    </div>
     <div class="side-sec">
       <h3>Mostrar / detectar</h3>
       <div class="toggle on" data-cat="strong"><span class="dot" style="background:var(--strong)"></span>Muletillas léxicas<span class="ct" id="c-strong">0</span><span class="sw"></span></div>
@@ -213,6 +260,10 @@ HTML = r"""<!DOCTYPE html>
         <button class="mk off" onclick="unmarkAll()">－ Quitar todas</button>
       </div>
     </div>
+    <div class="side-sec" style="padding-bottom:6px">
+      <h3>Eliminadas (<span id="rmCount">0</span>) — click salta · ✕ restaura</h3>
+    </div>
+    <div id="removedList" style="max-height:170px;overflow-y:auto;flex-shrink:0"></div>
     <div class="side-sec" style="padding-bottom:8px">
       <h3>Hallazgos — click salta · ✂ marca</h3>
     </div>
@@ -275,10 +326,17 @@ function snapWordCut(i){
   return {s:start, e:end};
 }
 
+// ajustes manuales por palabra (override del snap automático)
+const customCut = {};
+function cutForWord(i){
+  if(customCut[i]) return {s:customCut[i].s, e:customCut[i].e};
+  return snapWordCut(i);
+}
+
 // reconstruye los rangos a saltar a partir de las palabras marcadas (pegados a silencio)
 function rebuildCuts(){
   const idxs=[...delSet].sort((a,b)=>a-b);
-  const raw=idxs.map(snapWordCut).sort((p,q)=>p.s-q.s);
+  const raw=idxs.map(i=>cutForWord(i)).sort((p,q)=>p.s-q.s);
   cuts=[];
   for(const r of raw){
     const last=cuts[cuts.length-1];
@@ -351,19 +409,20 @@ renderFindings();
 // ---- interacciones ----
 transcript.addEventListener('click',e=>{
   const p=e.target.closest('.pause');
-  if(p){ vid.currentTime=parseFloat(p.dataset.seek); vid.play(); return; }
+  if(p){ vid.currentTime=parseFloat(p.dataset.seek); return; }
   const wd=e.target.closest('.word');
-  if(wd){ vid.currentTime=WORDS[+wd.dataset.i].s; vid.play(); }
+  if(wd){ const i=+wd.dataset.i; selectWord(i); vid.currentTime=WORDS[i].s; }
 });
 transcript.addEventListener('dblclick',e=>{
   const wd=e.target.closest('.word'); if(!wd)return;
   e.preventDefault();
-  toggleDel(+wd.dataset.i);
+  const i=+wd.dataset.i; toggleDel(i); selectWord(i);
 });
 findings.addEventListener('click',e=>{
   const f=e.target.closest('.find'); if(!f)return;
-  if(e.target.closest('.cut')){ toggleDel(+f.dataset.i); return; }   // ✂ marca/quita
-  vid.currentTime=parseFloat(f.dataset.seek); vid.play();
+  const i=+f.dataset.i;
+  if(e.target.closest('.cut')){ toggleDel(i); selectWord(i); return; }   // ✂ marca/quita
+  selectWord(i); vid.currentTime=parseFloat(f.dataset.seek);
 });
 
 function toggleDel(i){
@@ -384,6 +443,8 @@ function updateDelStats(){
   let t=0;delSet.forEach(i=>t+=WORDS[i].e-WORDS[i].s);
   document.getElementById('s-time').textContent=t.toFixed(1)+'s';
   if(typeof refreshFindingMarks==='function') refreshFindingMarks();
+  if(typeof renderRemovedList==='function') renderRemovedList();
+  if(typeof drawWave==='function' && selIdx>=0) { updateInspector(); }
 }
 // marcar/desmarcar por categoría
 function markCat(cat){
@@ -418,6 +479,7 @@ let lastIdx=-1;
 function tick(){
   const t=vid.currentTime;
   document.getElementById('clock').textContent=fmt(t);
+  if(!vid.paused && selIdx>=0 && document.getElementById('inspector').style.display!=='none') drawWave();
   // ---- SALTAR los trozos eliminados: empalme duro instantáneo (sin mute/transición) ----
   // c.s ya viene metido en el silencio previo, así que saltar justo ahí no deja oír nada.
   if(!vid.paused && cuts.length){
@@ -502,6 +564,102 @@ async function renderVideo(){
   }catch(err){ clearInterval(tick); hint.textContent='❌ '+err.message; }
   btn.disabled=false;
 }
+
+// ============ INSPECTOR + WAVEFORM (ajuste fino por palabra) ============
+let PEAKS=null, PPS=100, selIdx=-1;
+fetch('peaks.json').then(r=>r.ok?r.json():null).then(j=>{ if(j){PEAKS=j.peaks;PPS=j.pps; if(selIdx>=0)drawWave();} }).catch(()=>{});
+const wave=document.getElementById('wave'); const wctx=wave.getContext('2d');
+let viewS=0, viewE=1;
+function normw(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,''); }
+function tcf(s){const m=Math.floor(s/60),sec=(s%60);return m+':'+(sec<10?'0':'')+sec.toFixed(2);}
+function curCut(){ return selIdx<0?null:(customCut[selIdx]?{s:customCut[selIdx].s,e:customCut[selIdx].e}:snapWordCut(selIdx)); }
+function ensureCustom(){ if(!customCut[selIdx]){ const c=snapWordCut(selIdx); customCut[selIdx]={s:c.s,e:c.e}; } return customCut[selIdx]; }
+
+function selectWord(i){
+  selIdx=i;
+  wordEls.forEach(el=>el.classList.remove('sel'));
+  if(wordEls[i]) wordEls[i].classList.add('sel');
+  document.getElementById('inspector').style.display='block';
+  updateInspector();
+}
+function updateInspector(){
+  if(selIdx<0)return;
+  const w=WORDS[selIdx], c=curCut();
+  document.getElementById('insWord').innerHTML='«<b>'+escapeHtml(w.w)+'</b>»';
+  document.getElementById('insStart').textContent=tcf(c.s);
+  document.getElementById('insEnd').textContent=tcf(c.e);
+  document.getElementById('insDur').textContent=(c.e-c.s).toFixed(2)+'s';
+  const mk=document.getElementById('insMark'), on=delSet.has(selIdx);
+  mk.textContent=on?'Quitar del corte':'Eliminar'; mk.classList.toggle('on',on);
+  const same=WORDS.filter(x=>normw(x.w)===normw(w.w)).length;
+  document.getElementById('insSame').textContent='Marcar las '+same+' iguales';
+  drawWave();
+}
+function drawWave(){
+  if(selIdx<0)return;
+  const c=curCut(), pad=Math.max(0.8,(c.e-c.s));
+  viewS=Math.max(0,c.s-pad); viewE=c.e+pad;
+  const W=wave.width,H=wave.height; wctx.clearRect(0,0,W,H);
+  const X=t=>(t-viewS)/(viewE-viewS)*W;
+  if(PEAKS){
+    for(let px=0;px<W;px++){
+      const t=viewS+(px/W)*(viewE-viewS), v=PEAKS[Math.floor(t*PPS)]||0, h=v*(H*0.92);
+      wctx.fillStyle=(t>=c.s&&t<c.e)?'#ef4444':'#5b6b8c';
+      wctx.fillRect(px,(H-h)/2,1,Math.max(1,h));
+    }
+  }else{
+    wctx.fillStyle='rgba(239,68,68,0.18)'; wctx.fillRect(X(c.s),0,X(c.e)-X(c.s),H);
+  }
+  wctx.fillStyle='#ffd24a'; wctx.fillRect(X(c.s)-1.5,0,3,H); wctx.fillRect(X(c.e)-1.5,0,3,H);
+  const ph=X(vid.currentTime); if(ph>=0&&ph<=W){ wctx.fillStyle='#fff'; wctx.fillRect(ph,0,1,H); }
+}
+let drag=null;
+wave.addEventListener('pointerdown',e=>{
+  if(selIdx<0)return;
+  const rect=wave.getBoundingClientRect();
+  const t=viewS+((e.clientX-rect.left)/rect.width)*(viewE-viewS), c=curCut();
+  drag=(Math.abs(t-c.s)<Math.abs(t-c.e))?'s':'e';
+  wave.setPointerCapture(e.pointerId); applyDrag(e);
+});
+wave.addEventListener('pointermove',e=>{ if(drag)applyDrag(e); });
+wave.addEventListener('pointerup',()=>{ drag=null; updateDelStats(); });
+function applyDrag(e){
+  const rect=wave.getBoundingClientRect();
+  const t=viewS+((e.clientX-rect.left)/rect.width)*(viewE-viewS), cc=ensureCustom();
+  if(drag==='s') cc.s=Math.max(0,Math.min(t,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,t);
+  if(!delSet.has(selIdx)){ delSet.add(selIdx); wordEls[selIdx].classList.add('del'); history.push(['del',selIdx]); }
+  rebuildCuts(); updateInspector();
+}
+function nudge(edge,dir){
+  if(selIdx<0)return;
+  const cc=ensureCustom(), step=0.033*dir;
+  if(edge==='s') cc.s=Math.max(0,Math.min(cc.s+step,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,cc.e+step);
+  updateDelStats();
+}
+function toggleSelDel(){ if(selIdx<0)return; toggleDel(selIdx); updateInspector(); }
+function markAllSame(){
+  if(selIdx<0)return;
+  const key=normw(WORDS[selIdx].w);
+  WORDS.forEach((w,i)=>{ if(normw(w.w)===key && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); history.push(['del',i]); } });
+  updateDelStats();
+}
+function playSel(){ if(selIdx<0)return; const c=curCut(); vid.currentTime=Math.max(0,c.s-0.6); vid.play(); }
+
+// ---- lista de Eliminadas ----
+const removedList=document.getElementById('removedList');
+function renderRemovedList(){
+  const arr=[...delSet].sort((a,b)=>a-b);
+  document.getElementById('rmCount').textContent=arr.length;
+  removedList.innerHTML=arr.map(i=>{const c=cutForWord(i);
+    return '<div class="rm" data-i="'+i+'" data-seek="'+c.s.toFixed(3)+'"><span class="tm">'+fmt(c.s)+'</span><span class="w">'+escapeHtml(WORDS[i].w)+'</span><span class="x">✕</span></div>';
+  }).join('');
+}
+removedList.addEventListener('click',e=>{
+  const r=e.target.closest('.rm'); if(!r)return;
+  const i=+r.dataset.i;
+  if(e.target.closest('.x')){ toggleDel(i); return; }
+  selectWord(i); vid.currentTime=parseFloat(r.dataset.seek);
+});
 
 // ---- auto-marcar muletillas vocalizadas (eh, em, mmm, ah, o sea) al cargar ----
 function autoMarkFillers(){
