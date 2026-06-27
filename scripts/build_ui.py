@@ -336,23 +336,29 @@ const SKIP_BRIDGE = 0.35;// fusiona cortes separados por menos de esto
 let userMuted = false;   // si el usuario silenció a propósito, no lo tocamos
 
 // puntos medios de los silencios (donde es más limpio cortar/empalmar)
-const SIL_MID = SILENCES.map(s=>({a:s[0], b:s[1], mid:(s[0]+s[1])/2}));
-const SEARCH = 1.3;  // ventana (s) para buscar el silencio que bordea la palabra
+const SEARCH = 1.3;  // ventana (s) máx para pegar el corte a un silencio vecino
 
 // dada una palabra, calcula el rango de corte pegado a los silencios vecinos:
 // del medio del silencio anterior al medio del silencio siguiente.
+// ¿hay alguna palabra (que no sea la i) cuyo inicio caiga en (a,b)?
+function wordStartsBetween(a,b,i){
+  for(let j=0;j<WORDS.length;j++){ if(j!==i && WORDS[j].s>a+0.02 && WORDS[j].s<b-0.02) return true; }
+  return false;
+}
 function snapWordCut(i){
   const w=WORDS[i];
-  const c=(w.s+w.e)/2;
-  // silencio anterior: el de mayor 'mid' que esté antes del centro
-  let before=null;
-  for(const s of SIL_MID){ if(s.mid < c) { if(!before || s.mid>before.mid) before=s; } }
-  // silencio siguiente: el de menor 'mid' que esté después del centro
-  let after=null;
-  for(const s of SIL_MID){ if(s.mid > c) { if(!after || s.mid<after.mid) after=s; } }
-  let start = (before && (c-before.mid) <= SEARCH) ? before.mid : (w.s - Math.min(Math.max(w.g||0,0),0.18));
-  let end   = (after  && (after.mid-c) <= SEARCH) ? after.mid  : w.e;
-  if(end <= start) end = Math.max(w.e, start+0.08);
+  let start=w.s, end=w.e;
+  // ATRÁS: silencio que TERMINA justo antes del eh, sin palabra entre el silencio y el eh
+  let bs=null;
+  for(const s of SILENCES){ if(s[1]<=w.s+0.06){ if(!bs||s[1]>bs[1]) bs=s; } }
+  if(bs && (w.s-bs[1])<SEARCH && !wordStartsBetween(bs[1], w.s, i)) start=(bs[0]+bs[1])/2;
+  else start = w.s - Math.min(Math.max(w.g||0,0),0.18);
+  // ADELANTE: silencio que EMPIEZA justo después del eh, sin palabra en medio
+  let as=null;
+  for(const s of SILENCES){ if(s[0]>=w.e-0.06){ if(!as||s[0]<as[0]) as=s; } }
+  if(as && (as[0]-w.e)<SEARCH && !wordStartsBetween(w.e, as[0], i)) end=(as[0]+as[1])/2;
+  else end = w.e;
+  if(end<=start) end=Math.max(w.e, start+0.06);
   return {s:start, e:end};
 }
 
