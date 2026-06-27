@@ -1,0 +1,3 @@
+# Editor de Muletillas — dependencias Python
+# (ffmpeg debe estar instalado en el sistema: `brew install ffmpeg`)
+stable-ts>=2.19.0

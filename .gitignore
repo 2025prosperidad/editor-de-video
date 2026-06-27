@@ -1,0 +1,21 @@
+# Resultados de trabajo y medios pesados (no se suben al repo)
+work/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.m4a
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Modelos de Whisper (se descargan solos la 1ª vez)
+*.pt
+models/
+
+# Sistema
+.DS_Store
