@@ -100,6 +100,8 @@ HTML = r"""<!DOCTYPE html>
   .word:hover{background:rgba(99,102,241,.22)}
   .word.active{background:var(--accent);color:#fff;font-weight:600}
   .word.sel{outline:2px solid var(--pause);outline-offset:1px;border-radius:3px}
+  .pause.sel{outline:2px solid #fff}
+  .pause.cutpause{background:rgba(239,68,68,.20);border-color:var(--del);color:var(--del);text-decoration:line-through}
   .word.spoken{color:#f0f0f7}
   /* categorias muletilla */
   .word.strong{color:var(--strong);text-decoration:underline wavy var(--strong) 1.5px;text-underline-offset:3px}
@@ -202,8 +204,8 @@ HTML = r"""<!DOCTYPE html>
     </video>
     <div class="meta">
       <h1>Editor de Muletillas</h1>
-      <p><b>Click</b> = saltar ahí · <b>doble-click</b> = eliminar (al reproducir se <b>salta de verdad</b>, no se oye).<br>
-      Las pausas <span style="color:var(--pause)">▸azules</span> son donde probablemente hubo un "eh".</p>
+      <p><b>Click</b> palabra/pausa = inspeccionar · <b>doble-click</b> = eliminar (se salta de verdad).<br>
+      Las pausas <span style="color:var(--pause)">▸azules</span> también se pueden recortar y ajustar.</p>
       <div class="stats">
         <span class="chip">Palabras <b id="s-words">0</b></span>
         <span class="chip">Muletillas <b id="s-fillers">0</b></span>
@@ -336,10 +338,24 @@ function cutForWord(i){
   return snapWordCut(i);
 }
 
-// reconstruye los rangos a saltar a partir de las palabras marcadas (pegados a silencio)
+// ---- PAUSAS / SILENCIOS como cortes (id = índice de la palabra siguiente al hueco) ----
+const GAP_KEEP = 0.12;          // segundos de silencio que se DEJAN a cada lado
+const gapSet = new Set();        // pausas marcadas para recortar
+const gapCut = {};               // ajustes manuales de pausas
+function gapDefault(i){
+  let s=WORDS[i-1].e+GAP_KEEP, e=WORDS[i].s-GAP_KEEP;
+  if(e<=s){ const m=(WORDS[i-1].e+WORDS[i].s)/2; s=m-0.03; e=m+0.03; }
+  return {s,e};
+}
+function gapCutFor(i){ return gapCut[i]?{s:gapCut[i].s,e:gapCut[i].e}:gapDefault(i); }
+function ensureGapCustom(i){ if(!gapCut[i]){const c=gapDefault(i);gapCut[i]={s:c.s,e:c.e};} return gapCut[i]; }
+
+// reconstruye los rangos a saltar: palabras marcadas + pausas marcadas
 function rebuildCuts(){
-  const idxs=[...delSet].sort((a,b)=>a-b);
-  const raw=idxs.map(i=>cutForWord(i)).sort((p,q)=>p.s-q.s);
+  const raw=[];
+  delSet.forEach(i=>raw.push(cutForWord(i)));
+  gapSet.forEach(i=>raw.push(gapCutFor(i)));
+  raw.sort((p,q)=>p.s-q.s);
   cuts=[];
   for(const r of raw){
     const last=cuts[cuts.length-1];
@@ -355,9 +371,9 @@ function build(){
   openPara();
   WORDS.forEach((w,i)=>{
     if(i>0 && w.p){ openPara(); }
-    // marcador de pausa antes de la palabra
+    // marcador de pausa antes de la palabra (clickable: seleccionar/recortar)
     if(i>0 && w.g>=PAUSE_TH){
-      html+='<span class="pause" data-seek="'+(WORDS[i-1].e)+'">▸'+w.g.toFixed(1)+'s</span>';
+      html+='<span class="pause" data-gap="'+i+'" data-seek="'+(WORDS[i-1].e)+'">▸'+w.g.toFixed(1)+'s</span>';
     }
     const cls = 'word'+(w.c?(' '+w.c):'');
     html+='<span class="'+cls+'" data-i="'+i+'">'+escapeHtml(w.w)+'</span> ';
@@ -394,7 +410,7 @@ WORDS.forEach((w,i)=>{
 findItems.sort((a,b)=>a.t-b.t);
 function renderFindings(){
   findings.innerHTML=findItems.map((f,k)=>
-    '<div class="find" data-k="'+k+'" data-seek="'+f.t+'" data-i="'+f.i+'">'+
+    '<div class="find" data-k="'+k+'" data-seek="'+f.t+'" data-i="'+f.i+'" data-type="'+f.type+'">'+
     '<span class="tm">'+fmt(f.t)+'</span>'+
     '<span class="lbl">'+f.label+'</span>'+
     '<span class="tag" style="background:'+f.color+'22;color:'+f.color+'">'+f.tag+'</span>'+
@@ -404,7 +420,8 @@ function renderFindings(){
 }
 function refreshFindingMarks(){
   findings.querySelectorAll('.find').forEach(el=>{
-    el.classList.toggle('marked', delSet.has(+el.dataset.i));
+    const i=+el.dataset.i, on=el.dataset.type==='pause'?gapSet.has(i):delSet.has(i);
+    el.classList.toggle('marked', on);
   });
 }
 renderFindings();
@@ -412,33 +429,39 @@ renderFindings();
 // ---- interacciones ----
 transcript.addEventListener('click',e=>{
   const p=e.target.closest('.pause');
-  if(p){ vid.currentTime=parseFloat(p.dataset.seek); return; }
+  if(p){ const g=+p.dataset.gap; selectGap(g); vid.currentTime=Math.max(0,gapCutFor(g).s-0.4); return; }
   const wd=e.target.closest('.word');
   if(wd){ const i=+wd.dataset.i; selectWord(i); vid.currentTime=WORDS[i].s; }
 });
 transcript.addEventListener('dblclick',e=>{
-  const wd=e.target.closest('.word'); if(!wd)return;
   e.preventDefault();
+  const p=e.target.closest('.pause');
+  if(p){ const g=+p.dataset.gap; selectGap(g); toggleGapDel(g); return; }   // doble-click pausa = recortar
+  const wd=e.target.closest('.word'); if(!wd)return;
   const i=+wd.dataset.i; toggleDel(i); selectWord(i);
 });
 findings.addEventListener('click',e=>{
   const f=e.target.closest('.find'); if(!f)return;
-  const i=+f.dataset.i;
-  if(e.target.closest('.cut')){ toggleDel(i); selectWord(i); return; }   // ✂ marca/quita
-  selectWord(i); vid.currentTime=parseFloat(f.dataset.seek);
+  const i=+f.dataset.i, gap=f.dataset.type==='pause';
+  if(e.target.closest('.cut')){ gap?(selectGap(i),toggleGapDel(i)):(toggleDel(i),selectWord(i)); return; }
+  gap?selectGap(i):selectWord(i); vid.currentTime=parseFloat(f.dataset.seek);
 });
 
 // ---- deshacer por instantáneas (cubre marcar, marcar-todas, nudge, arrastrar) ----
 function snapshot(){
-  undoStack.push({d:[...delSet], c:JSON.stringify(customCut)});
+  undoStack.push({d:[...delSet], c:JSON.stringify(customCut), g:[...gapSet], gc:JSON.stringify(gapCut)});
   if(undoStack.length>200) undoStack.shift();
 }
-function applyClasses(){ wordEls.forEach((el,i)=>el.classList.toggle('del', delSet.has(i))); }
+function applyClasses(){
+  wordEls.forEach((el,i)=>el.classList.toggle('del', delSet.has(i)));
+  document.querySelectorAll('.pause').forEach(el=>el.classList.toggle('cutpause', gapSet.has(+el.dataset.gap)));
+}
 function undo(){
   const s=undoStack.pop(); if(!s)return;
   delSet.clear(); s.d.forEach(i=>delSet.add(i));
-  for(const k in customCut) delete customCut[k];
-  Object.assign(customCut, JSON.parse(s.c));
+  gapSet.clear(); s.g.forEach(i=>gapSet.add(i));
+  for(const k in customCut) delete customCut[k]; Object.assign(customCut, JSON.parse(s.c));
+  for(const k in gapCut) delete gapCut[k]; Object.assign(gapCut, JSON.parse(s.gc));
   applyClasses(); updateDelStats(); if(selIdx>=0) updateInspector();
 }
 function toggleDel(i){
@@ -449,8 +472,8 @@ function toggleDel(i){
 }
 function updateDelStats(){
   rebuildCuts();
-  document.getElementById('s-del').textContent=delSet.size;
-  let t=0;delSet.forEach(i=>t+=WORDS[i].e-WORDS[i].s);
+  document.getElementById('s-del').textContent=delSet.size+gapSet.size;
+  const t=cuts.reduce((a,c)=>a+(c.e-c.s),0);
   document.getElementById('s-time').textContent=t.toFixed(1)+'s';
   if(typeof refreshFindingMarks==='function') refreshFindingMarks();
   if(typeof renderRemovedList==='function') renderRemovedList();
@@ -577,34 +600,56 @@ async function renderVideo(){
   btn.disabled=false;
 }
 
-// ============ INSPECTOR + WAVEFORM (ajuste fino por palabra) ============
-let PEAKS=null, PPS=100, selIdx=-1;
+// ============ INSPECTOR + WAVEFORM (palabras Y pausas) ============
+let PEAKS=null, PPS=100, selIdx=-1, selKind='word';
 fetch('peaks.json').then(r=>r.ok?r.json():null).then(j=>{ if(j){PEAKS=j.peaks;PPS=j.pps; if(selIdx>=0)drawWave();} }).catch(()=>{});
 const wave=document.getElementById('wave'); const wctx=wave.getContext('2d');
 let viewS=0, viewE=1;
 function normw(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,''); }
 function tcf(s){const m=Math.floor(s/60),sec=(s%60);return m+':'+(sec<10?'0':'')+sec.toFixed(2);}
-function curCut(){ return selIdx<0?null:(customCut[selIdx]?{s:customCut[selIdx].s,e:customCut[selIdx].e}:snapWordCut(selIdx)); }
-function ensureCustom(){ if(!customCut[selIdx]){ const c=snapWordCut(selIdx); customCut[selIdx]={s:c.s,e:c.e}; } return customCut[selIdx]; }
+const isGap=()=>selKind==='gap';
+function curCut(){
+  if(selIdx<0)return null;
+  if(isGap()) return gapCutFor(selIdx);
+  return customCut[selIdx]?{s:customCut[selIdx].s,e:customCut[selIdx].e}:snapWordCut(selIdx);
+}
+function ensureCustom(){
+  if(isGap()) return ensureGapCustom(selIdx);
+  if(!customCut[selIdx]){ const c=snapWordCut(selIdx); customCut[selIdx]={s:c.s,e:c.e}; }
+  return customCut[selIdx];
+}
+function isMarked(){ return isGap()?gapSet.has(selIdx):delSet.has(selIdx); }
 
-function selectWord(i){
-  selIdx=i;
+function clearSelHighlight(){
   wordEls.forEach(el=>el.classList.remove('sel'));
+  document.querySelectorAll('.pause').forEach(el=>el.classList.remove('sel'));
+}
+function selectWord(i){
+  selKind='word'; selIdx=i; clearSelHighlight();
   if(wordEls[i]) wordEls[i].classList.add('sel');
+  document.getElementById('inspector').style.display='block';
+  updateInspector();
+}
+function selectGap(i){
+  selKind='gap'; selIdx=i; clearSelHighlight();
+  const el=document.querySelector('.pause[data-gap="'+i+'"]'); if(el) el.classList.add('sel');
   document.getElementById('inspector').style.display='block';
   updateInspector();
 }
 function updateInspector(){
   if(selIdx<0)return;
-  const w=WORDS[selIdx], c=curCut();
-  document.getElementById('insWord').innerHTML='«<b>'+escapeHtml(w.w)+'</b>»';
+  const c=curCut();
+  document.getElementById('insWord').innerHTML = isGap()
+     ? '⏸ <b>pausa</b> ('+(WORDS[selIdx].g||0).toFixed(1)+'s de silencio)'
+     : '«<b>'+escapeHtml(WORDS[selIdx].w)+'</b>»';
   document.getElementById('insStart').textContent=tcf(c.s);
   document.getElementById('insEnd').textContent=tcf(c.e);
   document.getElementById('insDur').textContent=(c.e-c.s).toFixed(2)+'s';
-  const mk=document.getElementById('insMark'), on=delSet.has(selIdx);
-  mk.textContent=on?'Quitar del corte':'Eliminar'; mk.classList.toggle('on',on);
-  const same=WORDS.filter(x=>normw(x.w)===normw(w.w)).length;
-  document.getElementById('insSame').textContent='Marcar las '+same+' iguales';
+  const mk=document.getElementById('insMark'), on=isMarked();
+  mk.textContent=on?'Quitar del corte':(isGap()?'Recortar pausa':'Eliminar'); mk.classList.toggle('on',on);
+  const same=document.getElementById('insSame');
+  if(isGap()){ same.style.display='none'; }
+  else{ same.style.display=''; same.textContent='Marcar las '+WORDS.filter(x=>normw(x.w)===normw(WORDS[selIdx].w)).length+' iguales'; }
   drawWave();
 }
 function drawWave(){
@@ -640,9 +685,20 @@ function applyDrag(e){
   const rect=wave.getBoundingClientRect();
   const t=viewS+((e.clientX-rect.left)/rect.width)*(viewE-viewS), cc=ensureCustom();
   if(drag==='s') cc.s=Math.max(0,Math.min(t,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,t);
-  if(!delSet.has(selIdx)){ delSet.add(selIdx); wordEls[selIdx].classList.add('del'); }
+  if(!isMarked()){ markSel(true); }
   rebuildCuts(); updateInspector();
 }
+// marca/desmarca lo seleccionado (palabra o pausa) sin snapshot extra
+function markSel(on){
+  if(isGap()){
+    if(on) gapSet.add(selIdx); else gapSet.delete(selIdx);
+    const el=document.querySelector('.pause[data-gap="'+selIdx+'"]'); if(el) el.classList.toggle('cutpause',on);
+  }else{
+    if(on){ delSet.add(selIdx); wordEls[selIdx].classList.add('del'); }
+    else  { delSet.delete(selIdx); wordEls[selIdx].classList.remove('del'); }
+  }
+}
+function toggleGapDel(i){ snapshot(); if(gapSet.has(i)){gapSet.delete(i);} else {gapSet.add(i);} applyClasses(); updateDelStats(); }
 function nudge(edge,dir){
   if(selIdx<0)return;
   snapshot();
@@ -650,7 +706,11 @@ function nudge(edge,dir){
   if(edge==='s') cc.s=Math.max(0,Math.min(cc.s+step,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,cc.e+step);
   updateDelStats();
 }
-function toggleSelDel(){ if(selIdx<0)return; toggleDel(selIdx); updateInspector(); }
+function toggleSelDel(){
+  if(selIdx<0)return;
+  if(isGap()) toggleGapDel(selIdx); else toggleDel(selIdx);
+  updateInspector();
+}
 function markAllSame(){
   if(selIdx<0)return;
   snapshot();
@@ -663,17 +723,20 @@ function playSel(){ if(selIdx<0)return; const c=curCut(); vid.currentTime=Math.m
 // ---- lista de Eliminadas ----
 const removedList=document.getElementById('removedList');
 function renderRemovedList(){
-  const arr=[...delSet].sort((a,b)=>a-b);
-  document.getElementById('rmCount').textContent=arr.length;
-  removedList.innerHTML=arr.map(i=>{const c=cutForWord(i);
-    return '<div class="rm" data-i="'+i+'" data-seek="'+c.s.toFixed(3)+'"><span class="tm">'+fmt(c.s)+'</span><span class="w">'+escapeHtml(WORDS[i].w)+'</span><span class="x">✕</span></div>';
-  }).join('');
+  const items=[...delSet].map(i=>({k:'word',i,c:cutForWord(i),label:WORDS[i].w}))
+    .concat([...gapSet].map(i=>({k:'gap',i,c:gapCutFor(i),label:'⏸ pausa'})))
+    .sort((a,b)=>a.c.s-b.c.s);
+  document.getElementById('rmCount').textContent=items.length;
+  removedList.innerHTML=items.map(it=>
+    '<div class="rm" data-k="'+it.k+'" data-i="'+it.i+'" data-seek="'+it.c.s.toFixed(3)+'">'+
+    '<span class="tm">'+fmt(it.c.s)+'</span><span class="w">'+escapeHtml(it.label)+'</span><span class="x">✕</span></div>'
+  ).join('');
 }
 removedList.addEventListener('click',e=>{
   const r=e.target.closest('.rm'); if(!r)return;
-  const i=+r.dataset.i;
-  if(e.target.closest('.x')){ toggleDel(i); return; }
-  selectWord(i); vid.currentTime=parseFloat(r.dataset.seek);
+  const i=+r.dataset.i, gap=r.dataset.k==='gap';
+  if(e.target.closest('.x')){ gap?toggleGapDel(i):toggleDel(i); return; }
+  gap?selectGap(i):selectWord(i); vid.currentTime=parseFloat(r.dataset.seek);
 });
 
 // ---- auto-marcar muletillas vocalizadas (eh, em, mmm, ah, o sea) al cargar ----
