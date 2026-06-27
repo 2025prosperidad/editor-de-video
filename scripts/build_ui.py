@@ -262,8 +262,21 @@ HTML = r"""<!DOCTYPE html>
         <button class="mk" onclick="markCat('strong')">＋ Muletillas (eh…)</button>
         <button class="mk" onclick="markCat('repeat')">＋ Repeticiones</button>
         <button class="mk" onclick="markCat('weak')">＋ Conectores</button>
-        <button class="mk off" onclick="unmarkAll()">－ Quitar todas</button>
+        <button class="mk off" onclick="unmarkAll()">－ Quitar palabras marcadas</button>
       </div>
+    </div>
+    <div class="side-sec">
+      <h3>Pausas / silencios</h3>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:8px">
+        Recortar pausas ≥ <input id="pauseThr" type="number" step="0.1" min="0.3" value="1.0"
+          style="width:54px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--txt);padding:4px 6px"> s
+        <button class="mk" style="flex:0;padding:5px 10px" onclick="markPausesOver()">Aplicar</button>
+      </label>
+      <div class="markbtns">
+        <button class="mk" onclick="markAllPauses()">＋ Recortar TODAS las pausas</button>
+        <button class="mk off" onclick="unmarkAllPauses()">－ Quitar todas las pausas</button>
+      </div>
+      <div id="pauseBuckets" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
     </div>
     <div class="side-sec" style="padding-bottom:6px">
       <h3>Eliminadas (<span id="rmCount">0</span>) — click salta · ✕ restaura</h3>
@@ -290,6 +303,8 @@ HTML = r"""<!DOCTYPE html>
         <option value="23">Media (CRF 23)</option>
       </select>
     </label>
+    <input class="search" id="outName" style="max-width:230px" placeholder="nombre o ruta de salida"
+           title="nombre de archivo (se guarda en la carpeta del proyecto) o ruta absoluta">
     <button class="b-export" onclick="exportJSON()">⬇ Exportar JSON</button>
     <button class="b-render" id="btnRender" onclick="renderVideo()">🎬 Renderizar video</button>
   </div>
@@ -349,6 +364,31 @@ function gapDefault(i){
 }
 function gapCutFor(i){ return gapCut[i]?{s:gapCut[i].s,e:gapCut[i].e}:gapDefault(i); }
 function ensureGapCustom(i){ if(!gapCut[i]){const c=gapDefault(i);gapCut[i]={s:c.s,e:c.e};} return gapCut[i]; }
+
+// --- selección masiva de pausas (todas / por umbral / por grupos de duración) ---
+const PAUSE_IDS = WORDS.map((w,i)=>i).filter(i=>i>0 && WORDS[i].g>=PAUSE_TH);
+const PAUSE_BUCKETS = [[0.7,1.0],[1.0,1.5],[1.5,2.0],[2.0,3.0],[3.0,999]];
+function pausesIn(lo,hi){ return PAUSE_IDS.filter(i=>WORDS[i].g>=lo && WORDS[i].g<hi); }
+function markAllPauses(){ snapshot(); PAUSE_IDS.forEach(i=>gapSet.add(i)); applyClasses(); updateDelStats(); }
+function unmarkAllPauses(){ if(!gapSet.size)return; snapshot(); gapSet.clear(); applyClasses(); updateDelStats(); }
+function markPausesOver(){
+  const thr=parseFloat(document.getElementById('pauseThr').value)||0;
+  snapshot(); PAUSE_IDS.forEach(i=>{ if(WORDS[i].g>=thr) gapSet.add(i); }); applyClasses(); updateDelStats();
+}
+function toggleBucket(lo,hi){
+  const ids=pausesIn(lo,hi), allOn=ids.every(i=>gapSet.has(i));
+  snapshot(); ids.forEach(i=>{ allOn?gapSet.delete(i):gapSet.add(i); }); applyClasses(); updateDelStats();
+}
+function renderPauseBuckets(){
+  const el=document.getElementById('pauseBuckets'); if(!el)return;
+  el.innerHTML=PAUSE_BUCKETS.map(([lo,hi])=>{
+    const ids=pausesIn(lo,hi); if(!ids.length) return '';
+    const m=ids.filter(i=>gapSet.has(i)).length;
+    const lbl=(hi>=999?('≥ '+lo.toFixed(1)):(lo.toFixed(1)+'–'+hi.toFixed(1)))+'s';
+    const cls='mk'+(m===ids.length?'':' off');
+    return '<button class="'+cls+'" style="font-size:12px" onclick="toggleBucket('+lo+','+hi+')">'+lbl+' &nbsp;<b>'+m+'/'+ids.length+'</b></button>';
+  }).join('');
+}
 
 // reconstruye los rangos a saltar: palabras marcadas + pausas marcadas
 function rebuildCuts(){
@@ -477,6 +517,7 @@ function updateDelStats(){
   document.getElementById('s-time').textContent=t.toFixed(1)+'s';
   if(typeof refreshFindingMarks==='function') refreshFindingMarks();
   if(typeof renderRemovedList==='function') renderRemovedList();
+  if(typeof renderPauseBuckets==='function') renderPauseBuckets();
   if(typeof drawWave==='function' && selIdx>=0) { updateInspector(); }
 }
 // marcar/desmarcar por categoría
@@ -585,13 +626,16 @@ async function renderVideo(){
   btn.disabled=true; const t0=Date.now();
   hint.textContent='⏳ Renderizando en calidad…';
   const tick=setInterval(()=>{hint.textContent='⏳ Renderizando… '+Math.round((Date.now()-t0)/1000)+'s';},500);
+  const out=document.getElementById('outName').value.trim();
   try{
     const res=await fetch('/render',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({fillers:cuts.map(c=>[+c.s.toFixed(3),+c.e.toFixed(3)]),crf:+crf})});
+      body:JSON.stringify({fillers:cuts.map(c=>[+c.s.toFixed(3),+c.e.toFixed(3)]),crf:+crf,out})});
     const j=await res.json();
     clearInterval(tick);
     if(j.ok){
-      hint.innerHTML='✅ Listo: <a href="'+j.file+'?t='+Date.now()+'" download style="color:#10b981">descargar video</a>';
+      const secs=Math.round((Date.now()-t0)/1000);
+      hint.innerHTML='✅ '+secs+'s · guardado en <code style="color:#10b981">'+(j.path||j.file)+'</code> · '+
+        '<a href="'+j.file+'?t='+Date.now()+'" download style="color:#6366f1">descargar</a>';
       window.open(j.file+'?t='+Date.now(),'_blank');
     }else{
       hint.textContent='❌ '+(j.error||'error'); alert('Error al renderizar:\n'+(j.error||''));

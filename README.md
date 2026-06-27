@@ -82,7 +82,10 @@ python3 pipeline.py mi-video.mp4 --texto transcripcion.txt
 #    - doble-click en una palabra para marcar/desmarcar
 #    - botones "Marcar para cortar" (léxicas / repeticiones / conectores) o ✂ en cada hallazgo
 #    - dale play: verás que salta los cortes
-#    - elige Calidad y pulsa "🎬 Renderizar video"  ->  genera y descarga el MP4 final
+#    - pausas: recórtalas en grupo por duración, todas, o ≥ X segundos
+#    - elige Calidad, el nombre/ruta de salida y pulsa "🎬 Renderizar video"
+#      (se guarda en work/<video>/ por defecto, o en la ruta absoluta que escribas;
+#       el editor te muestra la ruta exacta donde quedó)
 
 # (alternativa por terminal, sin el botón)
 python3 scripts/cut.py ~/Downloads/fillers-manual-5min.json mi-video.mp4 salida.mp4 14

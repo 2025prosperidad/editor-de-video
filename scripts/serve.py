@@ -5,7 +5,7 @@ seek/saltos en el <video>. python -m http.server NO soporta Range.
 
 Uso: python3 scripts/serve.py [puerto] [directorio]
 """
-import http.server, socketserver, os, re, sys, json, subprocess
+import http.server, socketserver, os, re, sys, json, subprocess, shutil
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8777
 DIRECTORY = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
@@ -38,13 +38,30 @@ class RangeHandler(http.server.SimpleHTTPRequestHandler):
                 raise RuntimeError(f"No encuentro el video original: {video}")
             cuts_path = os.path.join(DIRECTORY, "cortes.json")
             json.dump({"fillers": fillers}, open(cuts_path, "w"))
-            out = os.path.join(DIRECTORY, "final.mp4")
+            # destino: nombre simple -> carpeta del proyecto; ruta/absoluta -> tal cual
+            out = (body.get("out") or "").strip() or "final.mp4"
+            if os.path.isabs(out):
+                target = out
+            elif os.sep in out or "/" in out:
+                target = os.path.abspath(os.path.expanduser(out))
+            else:
+                target = os.path.join(DIRECTORY, out)
+            if not target.lower().endswith((".mp4", ".mov", ".mkv")):
+                target += ".mp4"
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
             r = subprocess.run(
-                [sys.executable, os.path.join(SCRIPTS, "cut.py"), cuts_path, video, out, crf],
+                [sys.executable, os.path.join(SCRIPTS, "cut.py"), cuts_path, video, target, crf],
                 capture_output=True, text=True)
             if r.returncode != 0:
                 raise RuntimeError(r.stderr[-500:] or "ffmpeg falló")
-            self._json({"ok": True, "file": "final.mp4", "crf": crf})
+            # para poder previsualizar/descargar desde el navegador necesita estar dentro de DIRECTORY
+            absdir = os.path.abspath(DIRECTORY)
+            if os.path.commonpath([os.path.abspath(target), absdir]) == absdir:
+                served = os.path.relpath(target, DIRECTORY)
+            else:
+                shutil.copy(target, os.path.join(DIRECTORY, "final.mp4"))
+                served = "final.mp4"
+            self._json({"ok": True, "file": served, "path": os.path.abspath(target), "crf": crf})
         except Exception as e:
             self._json({"ok": False, "error": str(e)}, code=500)
 
