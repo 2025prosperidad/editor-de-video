@@ -12,7 +12,7 @@ Defaults:
   video_salida  = out/video-sin-muletillas.mp4
   crf           = 18   (menor = más calidad; 14 ≈ casi sin pérdida, 0 = lossless)
 """
-import sys, os, json, subprocess, shutil
+import sys, os, json, subprocess, shutil, tempfile
 
 HOME = os.path.expanduser("~")
 FILLERS = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HOME, "Downloads", "fillers-manual-5min.json")
@@ -62,16 +62,20 @@ concat="".join(f"[v{i}][a{i}]" for i in range(len(keep)))
 filt="".join(parts)+f"{concat}concat=n={len(keep)}:v=1:a=1[v][a]"
 
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
-# filtro largo -> archivo temporal (ffmpeg -filter_complex_script)
-script_path = OUT+".filter.txt"
-open(script_path,"w").write(filt)
 
-cmd=["ffmpeg","-y","-i",VIDEO,"-filter_complex_script",script_path,
-     "-map","[v]","-map","[a]","-c:v","libx264","-preset","slow","-crf",str(CRF),
-     "-pix_fmt","yuv420p","-c:a","aac","-b:a","256k",OUT]
-print(f"Renderizando con ffmpeg (CRF {CRF})...")
-r=subprocess.run(cmd)
-os.remove(script_path)
+fd, script_path = tempfile.mkstemp(suffix=".filter.txt", prefix="cut_")
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write(filt)
+    cmd=["ffmpeg","-y","-i",VIDEO,"-filter_complex_script",script_path,
+         "-map","[v]","-map","[a]","-c:v","libx264","-preset","slow","-crf",str(CRF),
+         "-pix_fmt","yuv420p","-c:a","aac","-b:a","256k",OUT]
+    print(f"Renderizando con ffmpeg (CRF {CRF})...")
+    r=subprocess.run(cmd)
+finally:
+    if os.path.exists(script_path):
+        os.remove(script_path)
+
 if r.returncode==0:
     print(f"\n✅ Listo -> {OUT}  ({sum(e-s for s,e in keep):.1f}s, sin muletillas)")
 else:
