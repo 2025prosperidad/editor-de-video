@@ -253,6 +253,9 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="side-sec">
       <h3>Marcar para cortar</h3>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="autoEh" checked> Auto-marcar muletillas (eh, mmm…)
+      </label>
       <div class="markbtns">
         <button class="mk" onclick="markCat('strong')">＋ Muletillas (eh…)</button>
         <button class="mk" onclick="markCat('repeat')">＋ Repeticiones</button>
@@ -299,7 +302,7 @@ const transcript = document.getElementById('transcript');
 const findings = document.getElementById('findings');
 
 const delSet = new Set();
-const history = [];
+let undoStack = [];
 let wordEls = [];
 let cuts = [];           // rangos [s,e] fusionados que se SALTAN al reproducir
 const SKIP_BRIDGE = 0.35;// fusiona cortes separados por menos de esto
@@ -425,16 +428,23 @@ findings.addEventListener('click',e=>{
   selectWord(i); vid.currentTime=parseFloat(f.dataset.seek);
 });
 
-function toggleDel(i){
-  if(delSet.has(i)){ delSet.delete(i); wordEls[i].classList.remove('del'); history.push(['un',i]); }
-  else{ delSet.add(i); wordEls[i].classList.add('del'); history.push(['del',i]); }
-  updateDelStats();
+// ---- deshacer por instantáneas (cubre marcar, marcar-todas, nudge, arrastrar) ----
+function snapshot(){
+  undoStack.push({d:[...delSet], c:JSON.stringify(customCut)});
+  if(undoStack.length>200) undoStack.shift();
 }
+function applyClasses(){ wordEls.forEach((el,i)=>el.classList.toggle('del', delSet.has(i))); }
 function undo(){
-  const last=history.pop(); if(!last)return;
-  const[a,i]=last;
-  if(a==='del'){delSet.delete(i);wordEls[i].classList.remove('del');}
-  else{delSet.add(i);wordEls[i].classList.add('del');}
+  const s=undoStack.pop(); if(!s)return;
+  delSet.clear(); s.d.forEach(i=>delSet.add(i));
+  for(const k in customCut) delete customCut[k];
+  Object.assign(customCut, JSON.parse(s.c));
+  applyClasses(); updateDelStats(); if(selIdx>=0) updateInspector();
+}
+function toggleDel(i){
+  snapshot();
+  if(delSet.has(i)){ delSet.delete(i); wordEls[i].classList.remove('del'); }
+  else{ delSet.add(i); wordEls[i].classList.add('del'); }
   updateDelStats();
 }
 function updateDelStats(){
@@ -448,20 +458,22 @@ function updateDelStats(){
 }
 // marcar/desmarcar por categoría
 function markCat(cat){
-  let n=0;
-  WORDS.forEach((w,i)=>{ if(w.c===cat && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); history.push(['del',i]); n++; } });
+  snapshot();
+  WORDS.forEach((w,i)=>{ if(w.c===cat && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); } });
   updateDelStats();
 }
 function unmarkAll(){
   if(!delSet.size)return;
+  snapshot();
   delSet.forEach(i=>wordEls[i].classList.remove('del'));
-  delSet.clear(); history.length=0; updateDelStats();
+  delSet.clear(); updateDelStats();
 }
 function clearAll(){
   if(!delSet.size)return;
   if(confirm('¿Quitar todas las marcas de eliminación?')){
+    snapshot();
     delSet.forEach(i=>wordEls[i].classList.remove('del'));
-    delSet.clear();history.length=0;updateDelStats();
+    delSet.clear();updateDelStats();
   }
 }
 
@@ -616,6 +628,7 @@ function drawWave(){
 let drag=null;
 wave.addEventListener('pointerdown',e=>{
   if(selIdx<0)return;
+  snapshot();   // una sola instantánea por arrastre
   const rect=wave.getBoundingClientRect();
   const t=viewS+((e.clientX-rect.left)/rect.width)*(viewE-viewS), c=curCut();
   drag=(Math.abs(t-c.s)<Math.abs(t-c.e))?'s':'e';
@@ -627,11 +640,12 @@ function applyDrag(e){
   const rect=wave.getBoundingClientRect();
   const t=viewS+((e.clientX-rect.left)/rect.width)*(viewE-viewS), cc=ensureCustom();
   if(drag==='s') cc.s=Math.max(0,Math.min(t,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,t);
-  if(!delSet.has(selIdx)){ delSet.add(selIdx); wordEls[selIdx].classList.add('del'); history.push(['del',selIdx]); }
+  if(!delSet.has(selIdx)){ delSet.add(selIdx); wordEls[selIdx].classList.add('del'); }
   rebuildCuts(); updateInspector();
 }
 function nudge(edge,dir){
   if(selIdx<0)return;
+  snapshot();
   const cc=ensureCustom(), step=0.033*dir;
   if(edge==='s') cc.s=Math.max(0,Math.min(cc.s+step,cc.e-0.05)); else cc.e=Math.max(cc.s+0.05,cc.e+step);
   updateDelStats();
@@ -639,8 +653,9 @@ function nudge(edge,dir){
 function toggleSelDel(){ if(selIdx<0)return; toggleDel(selIdx); updateInspector(); }
 function markAllSame(){
   if(selIdx<0)return;
+  snapshot();
   const key=normw(WORDS[selIdx].w);
-  WORDS.forEach((w,i)=>{ if(normw(w.w)===key && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); history.push(['del',i]); } });
+  WORDS.forEach((w,i)=>{ if(normw(w.w)===key && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); } });
   updateDelStats();
 }
 function playSel(){ if(selIdx<0)return; const c=curCut(); vid.currentTime=Math.max(0,c.s-0.6); vid.play(); }
@@ -662,11 +677,17 @@ removedList.addEventListener('click',e=>{
 });
 
 // ---- auto-marcar muletillas vocalizadas (eh, em, mmm, ah, o sea) al cargar ----
+// Se puede desactivar con la casilla, y "Deshacer/Limpiar" lo revierte.
 function autoMarkFillers(){
+  snapshot();   // permite deshacer el auto-marcado (volver a cero)
   WORDS.forEach((w,i)=>{ if(w.f && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); } });
   updateDelStats();
 }
-autoMarkFillers();
+if(document.getElementById('autoEh').checked) autoMarkFillers();
+document.getElementById('autoEh').addEventListener('change',e=>{
+  if(e.target.checked) autoMarkFillers();
+  else { snapshot(); WORDS.forEach((w,i)=>{ if(w.f && delSet.has(i)){ delSet.delete(i); wordEls[i].classList.remove('del'); } }); updateDelStats(); }
+});
 </script>
 </body>
 </html>"""
