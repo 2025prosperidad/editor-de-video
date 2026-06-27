@@ -5,11 +5,12 @@ seek/saltos en el <video>. python -m http.server NO soporta Range.
 
 Uso: python3 scripts/serve.py [puerto] [directorio]
 """
-import http.server, socketserver, os, re, sys
+import http.server, socketserver, os, re, sys, json, subprocess
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8777
 DIRECTORY = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
+SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
 
 class RangeHandler(http.server.SimpleHTTPRequestHandler):
@@ -19,6 +20,41 @@ class RangeHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    # ---- Renderizar el video final desde la interfaz (botón del editor) ----
+    def do_POST(self):
+        if self.path.rstrip("/") != "/render":
+            self.send_error(404); return
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(n) or b"{}")
+            fillers = body.get("fillers", [])
+            crf = str(body.get("crf", 18))
+            srcfile = os.path.join(DIRECTORY, "source.json")
+            if not os.path.exists(srcfile):
+                raise RuntimeError("No hay source.json (ruta del video original) en la carpeta de trabajo.")
+            video = json.load(open(srcfile))["video"]
+            if not os.path.exists(video):
+                raise RuntimeError(f"No encuentro el video original: {video}")
+            cuts_path = os.path.join(DIRECTORY, "cortes.json")
+            json.dump({"fillers": fillers}, open(cuts_path, "w"))
+            out = os.path.join(DIRECTORY, "final.mp4")
+            r = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS, "cut.py"), cuts_path, video, out, crf],
+                capture_output=True, text=True)
+            if r.returncode != 0:
+                raise RuntimeError(r.stderr[-500:] or "ffmpeg falló")
+            self._json({"ok": True, "file": "final.mp4", "crf": crf})
+        except Exception as e:
+            self._json({"ok": False, "error": str(e)}, code=500)
+
+    def _json(self, obj, code=200):
+        data = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_head(self):
         path = self.translate_path(self.path)

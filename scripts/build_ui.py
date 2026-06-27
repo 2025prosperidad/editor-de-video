@@ -144,10 +144,24 @@ HTML = r"""<!DOCTYPE html>
   .b-export{background:#10b981}.b-export:hover{background:#0e9e74}
   .b-undo{background:#52525f}.b-undo:hover{background:#62626f}
   .b-clear{background:#7a2230}.b-clear:hover{background:#922636}
-  .search{flex:1;max-width:260px;background:var(--panel2);border:1px solid var(--line);
+  .b-render{background:var(--accent)}.b-render:hover{filter:brightness(1.12)}
+  .b-render:disabled{opacity:.6;cursor:progress}
+  .qsel{font-size:11.5px;color:var(--txt-dim);display:flex;align-items:center;gap:6px}
+  .qsel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+               border-radius:6px;padding:6px 8px;font-size:12px}
+  .search{flex:1;max-width:200px;background:var(--panel2);border:1px solid var(--line);
           border-radius:7px;padding:8px 12px;color:var(--txt);font-size:13px}
   .hint{font-size:11.5px;color:var(--txt-dim)}
   .spacer{flex:1}
+  .markbtns{display:flex;flex-direction:column;gap:6px}
+  .mk{background:var(--panel2);border:1px solid var(--line);text-align:left;
+      font-weight:500;font-size:12.5px;color:var(--txt)}
+  .mk:hover{background:#26263200;border-color:var(--accent)}
+  .mk.off{color:var(--txt-dim)}
+  .find .cut{margin-left:6px;cursor:pointer;opacity:.5;flex-shrink:0}
+  .find .cut:hover{opacity:1}
+  .find.marked{background:rgba(239,68,68,.10)}
+  .find.marked .cut{opacity:1;color:var(--del)}
   mark{background:var(--accent);color:#fff;border-radius:3px}
   .legend{display:flex;gap:14px;font-size:11px;color:var(--txt-dim);flex-wrap:wrap}
   .legend i{font-style:normal;border-bottom:2px solid;padding-bottom:1px}
@@ -190,8 +204,17 @@ HTML = r"""<!DOCTYPE html>
       <div class="toggle on" data-cat="repeat"><span class="dot" style="background:var(--repeat)"></span>Repeticiones<span class="ct" id="c-repeat">0</span><span class="sw"></span></div>
       <div class="toggle" data-cat="weak"><span class="dot" style="background:var(--weak)"></span>Conectores (suave)<span class="ct" id="c-weak">0</span><span class="sw"></span></div>
     </div>
+    <div class="side-sec">
+      <h3>Marcar para cortar</h3>
+      <div class="markbtns">
+        <button class="mk" onclick="markCat('strong')">＋ Muletillas (eh…)</button>
+        <button class="mk" onclick="markCat('repeat')">＋ Repeticiones</button>
+        <button class="mk" onclick="markCat('weak')">＋ Conectores</button>
+        <button class="mk off" onclick="unmarkAll()">－ Quitar todas</button>
+      </div>
+    </div>
     <div class="side-sec" style="padding-bottom:8px">
-      <h3>Hallazgos — click para saltar</h3>
+      <h3>Hallazgos — click salta · ✂ marca</h3>
     </div>
     <div class="findings" id="findings"></div>
   </div>
@@ -201,10 +224,18 @@ HTML = r"""<!DOCTYPE html>
     <button class="b-play" id="play">▶ / ⏸</button>
     <input class="search" id="search" placeholder="Buscar palabra…">
     <button class="b-undo" onclick="undo()">↶ Deshacer</button>
-    <span class="spacer"></span>
-    <span class="hint">Doble-click marca para eliminar</span>
-    <button class="b-export" onclick="exportJSON()">⬇ Exportar cortes</button>
     <button class="b-clear" onclick="clearAll()">Limpiar</button>
+    <span class="spacer"></span>
+    <span class="hint" id="renderHint"></span>
+    <label class="qsel">Calidad
+      <select id="crf">
+        <option value="14">Máxima (CRF 14)</option>
+        <option value="18" selected>Alta (CRF 18)</option>
+        <option value="23">Media (CRF 23)</option>
+      </select>
+    </label>
+    <button class="b-export" onclick="exportJSON()">⬇ Exportar JSON</button>
+    <button class="b-render" id="btnRender" onclick="renderVideo()">🎬 Renderizar video</button>
   </div>
 </div>
 
@@ -305,8 +336,15 @@ function renderFindings(){
     '<div class="find" data-k="'+k+'" data-seek="'+f.t+'" data-i="'+f.i+'">'+
     '<span class="tm">'+fmt(f.t)+'</span>'+
     '<span class="lbl">'+f.label+'</span>'+
-    '<span class="tag" style="background:'+f.color+'22;color:'+f.color+'">'+f.tag+'</span></div>'
+    '<span class="tag" style="background:'+f.color+'22;color:'+f.color+'">'+f.tag+'</span>'+
+    '<span class="cut" title="marcar/quitar para cortar">✂</span></div>'
   ).join('');
+  refreshFindingMarks();
+}
+function refreshFindingMarks(){
+  findings.querySelectorAll('.find').forEach(el=>{
+    el.classList.toggle('marked', delSet.has(+el.dataset.i));
+  });
 }
 renderFindings();
 
@@ -324,6 +362,7 @@ transcript.addEventListener('dblclick',e=>{
 });
 findings.addEventListener('click',e=>{
   const f=e.target.closest('.find'); if(!f)return;
+  if(e.target.closest('.cut')){ toggleDel(+f.dataset.i); return; }   // ✂ marca/quita
   vid.currentTime=parseFloat(f.dataset.seek); vid.play();
 });
 
@@ -344,6 +383,18 @@ function updateDelStats(){
   document.getElementById('s-del').textContent=delSet.size;
   let t=0;delSet.forEach(i=>t+=WORDS[i].e-WORDS[i].s);
   document.getElementById('s-time').textContent=t.toFixed(1)+'s';
+  if(typeof refreshFindingMarks==='function') refreshFindingMarks();
+}
+// marcar/desmarcar por categoría
+function markCat(cat){
+  let n=0;
+  WORDS.forEach((w,i)=>{ if(w.c===cat && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); history.push(['del',i]); n++; } });
+  updateDelStats();
+}
+function unmarkAll(){
+  if(!delSet.size)return;
+  delSet.forEach(i=>wordEls[i].classList.remove('del'));
+  delSet.clear(); history.length=0; updateDelStats();
 }
 function clearAll(){
   if(!delSet.size)return;
@@ -425,6 +476,31 @@ function exportJSON(){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='fillers-manual-5min.json';a.click();
   alert('Exportado: '+ranges.length+' cortes ('+data.total_duration.toFixed(1)+'s)');
+}
+
+// ---- RENDERIZAR el video final desde aquí (llama al backend ffmpeg) ----
+async function renderVideo(){
+  rebuildCuts();
+  if(!cuts.length){ alert('No hay nada marcado para cortar.'); return; }
+  const crf=document.getElementById('crf').value;
+  const btn=document.getElementById('btnRender');
+  const hint=document.getElementById('renderHint');
+  btn.disabled=true; const t0=Date.now();
+  hint.textContent='⏳ Renderizando en calidad…';
+  const tick=setInterval(()=>{hint.textContent='⏳ Renderizando… '+Math.round((Date.now()-t0)/1000)+'s';},500);
+  try{
+    const res=await fetch('/render',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({fillers:cuts.map(c=>[+c.s.toFixed(3),+c.e.toFixed(3)]),crf:+crf})});
+    const j=await res.json();
+    clearInterval(tick);
+    if(j.ok){
+      hint.innerHTML='✅ Listo: <a href="'+j.file+'?t='+Date.now()+'" download style="color:#10b981">descargar video</a>';
+      window.open(j.file+'?t='+Date.now(),'_blank');
+    }else{
+      hint.textContent='❌ '+(j.error||'error'); alert('Error al renderizar:\n'+(j.error||''));
+    }
+  }catch(err){ clearInterval(tick); hint.textContent='❌ '+err.message; }
+  btn.disabled=false;
 }
 
 // ---- auto-marcar muletillas vocalizadas (eh, em, mmm, ah, o sea) al cargar ----

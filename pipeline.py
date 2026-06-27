@@ -13,7 +13,7 @@ Después, en el editor: marca/ajusta muletillas y "Exportar cortes".
 Para el video final:
   python3 scripts/cut.py work/<nombre>/cortes.json mi-video.mp4 salida.mp4
 """
-import os, sys, subprocess, argparse, webbrowser, threading, time
+import os, sys, subprocess, argparse, webbrowser, threading, time, json
 
 PY = sys.executable
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +38,9 @@ def main():
     stem = os.path.splitext(os.path.basename(args.video))[0]
     work = os.path.join(HERE, "work", stem)
     os.makedirs(work, exist_ok=True)
+    # ruta del video original -> la usa el botón "Renderizar" del editor
+    json.dump({"video": os.path.abspath(args.video)},
+              open(os.path.join(work, "source.json"), "w"))
     audio   = os.path.join(work, "audio.wav")
     words   = os.path.join(work, "words.json")
     silence = os.path.join(work, "silence.json")

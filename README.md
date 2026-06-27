@@ -37,8 +37,10 @@ manda nada a la nube. Todo lo demás (silencios, cortes, render) es **ffmpeg**, 
    ```bash
    python3 pipeline.py mi-video.mp4
    ```
-   Cómodo, pero Whisper a veces "limpia" algunas muletillas. Aun así, la **detección de
-   silencios** recupera las pausas donde suelen estar los "eh".
+   Cómodo, pero **Whisper "limpia" las muletillas vocalizadas**: no escribe los "eh/mmm".
+   En una prueba real de 5 min, el modo automático capturó **0 "eh"**, mientras que con
+   texto verbatim capturó **12**. En automático te apoyas en la **detección de silencios/
+   pausas** para encontrarlas, pero no tendrás cada "eh" como palabra.
 
 2. **Con transcripción verbatim (máxima precisión):** le pasas un `.txt` con el texto
    literal (p.ej. copiado de Descript, *con* los "eh"). Se hace **forced alignment** y
@@ -76,13 +78,14 @@ python3 pipeline.py mi-video.mp4
 python3 pipeline.py mi-video.mp4 --texto transcripcion.txt
 
 # 3. En el editor (navegador):
-#    - revisa las muletillas pre-marcadas (rojo = se elimina)
+#    - las muletillas (eh, mmm…) vienen PRE-MARCADAS en rojo
 #    - doble-click en una palabra para marcar/desmarcar
+#    - botones "Marcar para cortar" (léxicas / repeticiones / conectores) o ✂ en cada hallazgo
 #    - dale play: verás que salta los cortes
-#    - botón "Exportar cortes"  ->  descarga un JSON
+#    - elige Calidad y pulsa "🎬 Renderizar video"  ->  genera y descarga el MP4 final
 
-# 4. Renderizar el video final SIN muletillas (calidad original):
-python3 scripts/cut.py ~/Downloads/fillers-manual-5min.json mi-video.mp4 salida.mp4
+# (alternativa por terminal, sin el botón)
+python3 scripts/cut.py ~/Downloads/fillers-manual-5min.json mi-video.mp4 salida.mp4 14
 ```
 
 ## Estructura
