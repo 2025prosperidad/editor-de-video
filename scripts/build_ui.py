@@ -76,25 +76,29 @@ HTML = r"""<!DOCTYPE html>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
        background:var(--bg);color:var(--txt);height:100vh;overflow:hidden}
-  .app{display:grid;grid-template-columns:1fr 320px;grid-template-rows:auto 1fr;
+  .app{display:grid;grid-template-columns:360px minmax(0,1fr) 340px;grid-template-rows:auto 1fr auto;
        height:100vh;column-gap:0}
-  /* ---- TOP BAR (video + tiempo) ---- */
-  .topbar{grid-column:1/3;display:flex;align-items:center;gap:18px;padding:12px 22px;
+  /* ---- HEADER (título + stats + reloj) ---- */
+  .topbar{grid-column:1/4;display:flex;align-items:center;gap:24px;padding:10px 22px;
           background:var(--panel);border-bottom:1px solid var(--line)}
-  video{width:300px;height:169px;border-radius:8px;background:#000;flex-shrink:0}
-  .meta h1{font-size:17px;color:#fff;margin-bottom:4px}
-  .meta p{font-size:12.5px;color:var(--txt-dim);line-height:1.6}
+  .meta h1{font-size:16px;color:#fff;margin-bottom:3px}
+  .meta p{font-size:12px;color:var(--txt-dim);line-height:1.55}
   .meta b{color:var(--accent)}
-  .clock{margin-left:auto;text-align:right}
-  .clock .t{font-family:'SF Mono',Menlo,monospace;font-size:30px;font-weight:700;color:var(--accent)}
+  .clock{margin-left:auto;text-align:right;flex-shrink:0}
+  .clock .t{font-family:'SF Mono',Menlo,monospace;font-size:28px;font-weight:700;color:var(--accent)}
   .clock .d{font-size:12px;color:var(--txt-dim)}
-  .stats{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;max-width:520px}
   .chip{background:var(--panel2);border:1px solid var(--line);padding:5px 11px;
-        border-radius:20px;font-size:11.5px}
+        border-radius:20px;font-size:11.5px;white-space:nowrap}
   .chip b{color:#fff}
-  /* ---- TRANSCRIPT ---- */
-  .transcript{overflow-y:auto;padding:34px 56px 120px;position:relative;scroll-behavior:smooth}
-  .para{font-size:21px;line-height:2.1;margin-bottom:22px;max-width:820px}
+  /* ---- COLUMNA IZQUIERDA: video + inspector ---- */
+  .leftcol{grid-column:1;grid-row:2;background:var(--panel);border-right:1px solid var(--line);
+           overflow-y:auto;display:flex;flex-direction:column}
+  .leftcol video{width:100%;aspect-ratio:16/9;background:#000;display:block;flex-shrink:0}
+  .leftnote{padding:22px 18px;font-size:12.5px;color:var(--txt-dim);line-height:1.6;text-align:center}
+  /* ---- TRANSCRIPT (centro) ---- */
+  .transcript{grid-column:2;grid-row:2;overflow-y:auto;padding:40px 48px 120px;position:relative;scroll-behavior:smooth}
+  .para{font-size:21px;line-height:2.1;margin:0 auto 22px;max-width:760px}
   .word{display:inline;padding:2px 2px;border-radius:4px;cursor:pointer;
         color:var(--txt);transition:background .12s,color .12s}
   .word:hover{background:rgba(99,102,241,.22)}
@@ -119,8 +123,8 @@ HTML = r"""<!DOCTYPE html>
   .hide-weak   .word.weak{border-bottom:none;color:var(--txt)}
   .hide-repeat .word.repeat{text-decoration:none;color:var(--txt)}
   .hide-pause  .pause{display:none}
-  /* ---- SIDEBAR ---- */
-  .sidebar{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
+  /* ---- SIDEBAR (derecha) ---- */
+  .sidebar{grid-column:3;grid-row:2;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
            display:flex;flex-direction:column}
   .side-sec{padding:14px 16px;border-bottom:1px solid var(--line)}
   .side-sec h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-dim);margin-bottom:10px}
@@ -140,7 +144,7 @@ HTML = r"""<!DOCTYPE html>
   .find .tag{font-size:10px;padding:1px 6px;border-radius:8px;flex-shrink:0}
   .find.del-row .lbl{text-decoration:line-through;color:var(--del)}
   /* ---- BOTTOM BAR ---- */
-  .bottombar{grid-column:1/3;display:flex;align-items:center;gap:10px;padding:10px 22px;
+  .bottombar{grid-column:1/4;grid-row:3;display:flex;align-items:center;gap:10px;padding:10px 22px;
              background:var(--panel);border-top:1px solid var(--line)}
   button{padding:8px 16px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;color:#fff}
   .b-play{background:#33333f}.b-play:hover{background:#41414f}
@@ -169,10 +173,11 @@ HTML = r"""<!DOCTYPE html>
   .legend{display:flex;gap:14px;font-size:11px;color:var(--txt-dim);flex-wrap:wrap}
   .legend i{font-style:normal;border-bottom:2px solid;padding-bottom:1px}
   /* inspector / waveform */
-  #inspector{background:var(--panel2)}
-  .insword{font-size:15px;color:#fff;margin-bottom:8px}
+  .inspector{padding:14px 16px;border-bottom:1px solid var(--line)}
+  #inspector h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-dim);margin-bottom:10px}
+  .insword{font-size:16px;color:#fff;margin-bottom:10px}
   .insword b{color:var(--strong)}
-  #wave{width:100%;height:74px;background:#0b0b12;border:1px solid var(--line);
+  #wave{width:100%;height:96px;background:#0b0b12;border:1px solid var(--line);
         border-radius:6px;display:block;cursor:ew-resize;touch-action:none}
   .instimes{font-family:'SF Mono',Menlo,monospace;font-size:11px;color:var(--txt-dim);
             margin:8px 0;text-align:center}
@@ -197,22 +202,19 @@ HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <div class="app">
-  <!-- TOP -->
+  <!-- HEADER -->
   <div class="topbar">
-    <video id="vid" controls preload="metadata">
-      <source src="__VIDEO__" type="video/mp4">
-    </video>
     <div class="meta">
       <h1>Editor de Muletillas</h1>
       <p><b>Click</b> palabra/pausa = inspeccionar · <b>doble-click</b> = eliminar (se salta de verdad).<br>
       Las pausas <span style="color:var(--pause)">▸azules</span> también se pueden recortar y ajustar.</p>
-      <div class="stats">
-        <span class="chip">Palabras <b id="s-words">0</b></span>
-        <span class="chip">Muletillas <b id="s-fillers">0</b></span>
-        <span class="chip">Pausas <b id="s-pauses">0</b></span>
-        <span class="chip">A eliminar <b id="s-del">0</b></span>
-        <span class="chip">Tiempo cortado <b id="s-time">0.0s</b></span>
-      </div>
+    </div>
+    <div class="stats">
+      <span class="chip">Palabras <b id="s-words">0</b></span>
+      <span class="chip">Muletillas <b id="s-fillers">0</b></span>
+      <span class="chip">Pausas <b id="s-pauses">0</b></span>
+      <span class="chip">A eliminar <b id="s-del">0</b></span>
+      <span class="chip">Tiempo cortado <b id="s-time">0.0s</b></span>
     </div>
     <div class="clock">
       <div class="t" id="clock">0:00</div>
@@ -220,15 +222,15 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- TRANSCRIPT -->
-  <div class="transcript" id="transcript"></div>
-
-  <!-- SIDEBAR -->
-  <div class="sidebar">
-    <div class="side-sec" id="inspector" style="display:none">
-      <h3>Ajustar corte (como Descript)</h3>
+  <!-- LEFT: video + inspector -->
+  <div class="leftcol">
+    <video id="vid" controls preload="metadata">
+      <source src="__VIDEO__" type="video/mp4">
+    </video>
+    <div class="inspector" id="inspector" style="display:none">
+      <h3>Ajustar corte</h3>
       <div class="insword" id="insWord"></div>
-      <canvas id="wave" width="288" height="74"></canvas>
+      <canvas id="wave" width="328" height="96"></canvas>
       <div class="instimes"><b id="insStart">0:00.00</b> → <b id="insEnd">0:00.00</b> &nbsp;(<span id="insDur">0.0s</span>)</div>
       <div class="insrow"><span class="grow">Inicio</span>
         <button class="nb" onclick="nudge('s',-1)" title="más atrás">◀</button>
@@ -246,6 +248,14 @@ HTML = r"""<!DOCTYPE html>
         <button class="nb" style="font-size:11px;font-weight:500" onclick="playSel()">▶ escuchar el corte</button>
       </div>
     </div>
+    <div class="leftnote" id="leftnote">Haz <b style="color:var(--accent)">click</b> en una palabra o pausa del texto para ver su forma de onda y ajustar el corte aquí.</div>
+  </div>
+
+  <!-- TRANSCRIPT (centro) -->
+  <div class="transcript" id="transcript"></div>
+
+  <!-- SIDEBAR (derecha) -->
+  <div class="sidebar">
     <div class="side-sec">
       <h3>Mostrar / detectar</h3>
       <div class="toggle on" data-cat="strong"><span class="dot" style="background:var(--strong)"></span>Muletillas léxicas<span class="ct" id="c-strong">0</span><span class="sw"></span></div>
@@ -672,12 +682,14 @@ function selectWord(i){
   selKind='word'; selIdx=i; clearSelHighlight();
   if(wordEls[i]) wordEls[i].classList.add('sel');
   document.getElementById('inspector').style.display='block';
+  document.getElementById('leftnote').style.display='none';
   updateInspector();
 }
 function selectGap(i){
   selKind='gap'; selIdx=i; clearSelHighlight();
   const el=document.querySelector('.pause[data-gap="'+i+'"]'); if(el) el.classList.add('sel');
   document.getElementById('inspector').style.display='block';
+  document.getElementById('leftnote').style.display='none';
   updateInspector();
 }
 function updateInspector(){
