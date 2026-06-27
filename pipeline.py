@@ -46,15 +46,17 @@ def main():
     silence = os.path.join(work, "silence.json")
     proxy   = os.path.join(work, "proxy.mp4")
     html    = os.path.join(work, "editor.html")
+    peaks   = os.path.join(work, "peaks.json")
 
-    print("\n[1/5] Extrayendo audio…");   run(S("extract_audio.py"), "--video", args.video, "--out", audio)
-    print("\n[2/5] Palabras + timestamps…")
+    print("\n[1/6] Extrayendo audio…");   run(S("extract_audio.py"), "--video", args.video, "--out", audio)
+    print("\n[2/6] Palabras + timestamps…")
     align = [S("align.py"), "--audio", audio, "--out", words, "--modelo", args.modelo]
     if args.texto: align += ["--texto", args.texto]
     run(*align)
-    print("\n[3/5] Detectando silencios…"); run(S("silence.py"), audio, silence)
-    print("\n[4/5] Creando proxy…");        run(S("proxy.py"), "--video", args.video, "--out", proxy)
-    print("\n[5/5] Generando editor…")
+    print("\n[3/6] Detectando silencios…"); run(S("silence.py"), audio, silence)
+    print("\n[4/6] Forma de onda…");        run(S("peaks.py"), "--audio", audio, "--out", peaks)
+    print("\n[5/6] Creando proxy…");        run(S("proxy.py"), "--video", args.video, "--out", proxy)
+    print("\n[6/6] Generando editor…")
     run(S("build_ui.py"), "--words", words, "--silence", silence,
         "--video", "proxy.mp4", "--out", html)
 
