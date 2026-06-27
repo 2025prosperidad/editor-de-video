@@ -25,13 +25,19 @@ def norm(s):
                 if unicodedata.category(c) != "Mn")
     return re.sub(r"[^a-z0-9]", "", s)
 
-# muletillas "fuertes": casi siempre son relleno
-STRONG = {"eh", "em", "ehm", "mmm", "mm", "ah", "este", "esto", "pues", "osea"}
-# "debiles": dependen del contexto, se marcan suave y desactivadas por defecto
+# muletillas "fuertes": sonidos de relleno + "ah"/"osea" (resaltadas en ámbar).
+# OJO: "este"/"esto"/"pues" NO van aquí porque casi siempre son palabras
+# legítimas ("todo ESTE paso", "PUES sí") — el detector no entiende el contexto.
+STRONG = {"eh", "em", "ehm", "mmm", "mm", "ah", "osea"}
+# "debiles": dependen del contexto, se marcan suave y desactivadas por defecto.
+# Aquí van los demostrativos/conectores ambiguos para que NO se borren solos.
 WEAK   = {"como", "entonces", "bueno", "tipo", "digamos", "verdad", "vale",
-          "basicamente", "obviamente", "literal", "nada"}
-# muletillas VOCALIZADAS que se auto-marcan para cortar (sonidos de relleno)
-AUTO_FILLER = {"eh", "em", "ehm", "mmm", "mm", "ah", "osea"}
+          "basicamente", "obviamente", "literal", "nada",
+          "este", "esto", "pues"}
+# muletillas VOCALIZADAS que se auto-marcan para cortar (sonidos de relleno).
+# SOLO sonidos puros que nunca son una palabra real. "ah"/"osea" se resaltan
+# pero NO se borran solas: tú decides, porque a veces son legítimas.
+AUTO_FILLER = {"eh", "em", "ehm", "mmm", "mm"}
 
 # silencios reales del audio -> para "pegar" los cortes
 SILENCES = json.load(open(SIL_PATH)) if os.path.exists(SIL_PATH) else []
@@ -76,7 +82,7 @@ HTML = r"""<!DOCTYPE html>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
        background:var(--bg);color:var(--txt);height:100vh;overflow:hidden}
-  .app{display:grid;grid-template-columns:360px minmax(0,1fr) 340px;grid-template-rows:auto 1fr auto;
+  .app{display:grid;grid-template-columns:360px minmax(0,1fr) 340px;grid-template-rows:auto 1fr auto auto;
        height:100vh;column-gap:0}
   /* ---- HEADER (título + stats + reloj) ---- */
   .topbar{grid-column:1/4;display:flex;align-items:center;gap:24px;padding:10px 22px;
@@ -144,7 +150,28 @@ HTML = r"""<!DOCTYPE html>
   .find .tag{font-size:10px;padding:1px 6px;border-radius:8px;flex-shrink:0}
   .find.del-row .lbl{text-decoration:line-through;color:var(--del)}
   /* ---- BOTTOM BAR ---- */
-  .bottombar{grid-column:1/4;grid-row:3;display:flex;align-items:center;gap:10px;padding:10px 22px;
+  /* ---- LÍNEA DE TIEMPO global (onda de todo el audio) ---- */
+  .timeline{grid-column:1/4;grid-row:3;background:var(--panel);border-top:1px solid var(--line);
+            padding:7px 14px 9px}
+  .tl-bar{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .tl-bar .tl-title{font-size:11.5px;font-weight:700;color:var(--txt-dim)}
+  .tl-bar .sp{flex:1}
+  .tl-z{background:#33333f;color:#fff;border:none;width:26px;height:24px;border-radius:6px;
+        cursor:pointer;font-size:15px;font-weight:700;line-height:1}
+  .tl-z:hover{background:#41414f}
+  .tl-zlbl{font-size:11px;color:var(--txt-dim);min-width:42px;text-align:center;font-variant-numeric:tabular-nums}
+  .tl-del{background:var(--del);color:#fff;border:none;border-radius:6px;padding:5px 11px;
+          font-size:11.5px;font-weight:600;cursor:pointer}
+  .tl-del:disabled{opacity:.4;cursor:not-allowed}
+  .tl-clr{background:transparent;border:1px solid var(--line);color:var(--txt-dim);border-radius:6px;
+          padding:5px 9px;font-size:11.5px;cursor:pointer}
+  .tl-sel-info{font-size:11px;color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;min-width:120px}
+  .tl-canvas-wrap{position:relative}
+  #tlwave{display:block;width:100%;height:84px;cursor:text;border-radius:6px;background:var(--bg)}
+  .tl-scroll{width:100%;margin-top:5px;accent-color:var(--accent);cursor:pointer}
+  .tl-scroll.hidden{visibility:hidden}
+  .tl-hint{font-size:10px;color:var(--txt-dim);margin-top:2px}
+  .bottombar{grid-column:1/4;grid-row:4;display:flex;align-items:center;gap:10px;padding:10px 22px;
              background:var(--panel);border-top:1px solid var(--line)}
   button{padding:8px 16px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;color:#fff}
   .b-play{background:#33333f}.b-play:hover{background:#41414f}
@@ -153,6 +180,19 @@ HTML = r"""<!DOCTYPE html>
   .b-clear{background:#7a2230}.b-clear:hover{background:#922636}
   .b-render{background:var(--accent)}.b-render:hover{filter:brightness(1.12)}
   .b-render:disabled{opacity:.6;cursor:progress}
+  /* corte manual */
+  .mancut{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-top:10px}
+  .mancut-h{font-size:12px;font-weight:700;color:var(--del);margin-bottom:8px}
+  .mancut-times{display:flex;gap:12px;font-size:12px;color:var(--txt-dim);margin-bottom:9px;flex-wrap:wrap}
+  .mancut-times b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .mancut-row{display:flex;gap:7px;margin-bottom:7px}
+  .mancut-row button{flex:1;padding:7px 8px;font-size:12px}
+  .mc-set{background:#33333f}.mc-set:hover{background:#41414f}
+  .mc-set.armed{background:var(--accent)}
+  .mc-play{background:#33333f}.mc-play:hover{background:#41414f}
+  .mc-del{background:var(--del)}.mc-del:hover{filter:brightness(1.1)}
+  .mc-del:disabled{opacity:.4;cursor:not-allowed}
+  .mancut-hint{font-size:10.5px;color:var(--txt-dim);line-height:1.4}
   .qsel{font-size:11.5px;color:var(--txt-dim);display:flex;align-items:center;gap:6px}
   .qsel select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
                border-radius:6px;padding:6px 8px;font-size:12px}
@@ -227,6 +267,23 @@ HTML = r"""<!DOCTYPE html>
     <video id="vid" controls preload="metadata">
       <source src="__VIDEO__" type="video/mp4">
     </video>
+    <div class="mancut">
+      <div class="mancut-h">✂️ Corte manual (cualquier tramo o silencio)</div>
+      <div class="mancut-times">
+        <span>Inicio <b id="mcIn">—</b></span>
+        <span>Fin <b id="mcOut">—</b></span>
+        <span id="mcDur"></span>
+      </div>
+      <div class="mancut-row">
+        <button class="mc-set" onclick="mcSetIn()" title="usa el momento actual del video">⎡ Marcar inicio</button>
+        <button class="mc-set" onclick="mcSetOut()" title="usa el momento actual del video">Marcar fin ⎤</button>
+      </div>
+      <div class="mancut-row">
+        <button class="mc-play" id="mcPlayBtn" onclick="mcPreview()">▶ escuchar</button>
+        <button class="mc-del" id="mcDelBtn" onclick="mcDelete()" disabled>Eliminar tramo</button>
+      </div>
+      <div class="mancut-hint">Pausa el video donde empieza el tramo y pulsa «Marcar inicio»; ve al final y pulsa «Marcar fin». Luego «Eliminar tramo».</div>
+    </div>
     <div class="inspector" id="inspector" style="display:none">
       <h3>Ajustar corte</h3>
       <div class="insword" id="insWord"></div>
@@ -248,7 +305,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="nb" style="font-size:11px;font-weight:500" onclick="playSel()">▶ escuchar el corte</button>
       </div>
     </div>
-    <div class="leftnote" id="leftnote">Haz <b style="color:var(--accent)">click</b> en una palabra o pausa del texto para ver su forma de onda y ajustar el corte aquí.</div>
+    <div class="leftnote" id="leftnote">Haz <b style="color:var(--accent)">click</b> en una palabra o pausa para ver su forma de onda y ajustar el corte aquí.<br><br><b style="color:var(--del)">Cortar un tramo</b> (estilo CapCut): click en la 1ª palabra, luego <b style="color:var(--accent)">Shift+click</b> en la última → se borra todo lo del medio. Doble-click en una palabra la borra/restaura.</div>
   </div>
 
   <!-- TRANSCRIPT (centro) -->
@@ -299,6 +356,26 @@ HTML = r"""<!DOCTYPE html>
   </div>
 
   <!-- BOTTOM -->
+  <!-- LÍNEA DE TIEMPO: onda de todo el audio, con zoom y selección -->
+  <div class="timeline">
+    <div class="tl-bar">
+      <span class="tl-title">🌊 Línea de tiempo — arrastra sobre la onda para seleccionar y borrar</span>
+      <span class="tl-sel-info" id="tlSelInfo"></span>
+      <span class="sp"></span>
+      <button class="tl-del" id="tlDelBtn" onclick="tlDeleteSelection()" disabled>✂️ Eliminar selección</button>
+      <button class="tl-clr" onclick="tlClearSelection()">Quitar selección</button>
+      <span style="width:8px"></span>
+      <button class="tl-z" onclick="tlZoomBy(0.5)" title="alejar">−</button>
+      <span class="tl-zlbl" id="tlZoomLbl">1x</span>
+      <button class="tl-z" onclick="tlZoomBy(2)" title="acercar">+</button>
+    </div>
+    <div class="tl-canvas-wrap">
+      <canvas id="tlwave" height="84"></canvas>
+    </div>
+    <input type="range" class="tl-scroll hidden" id="tlScroll" min="0" max="1000" value="0">
+    <div class="tl-hint">Click = ir a ese punto · Arrastra = seleccionar tramo · Rueda del mouse = zoom · Las zonas rojas son lo que se elimina</div>
+  </div>
+
   <div class="bottombar">
     <button class="b-play" id="play">▶ / ⏸</button>
     <input class="search" id="search" placeholder="Buscar palabra…">
@@ -329,6 +406,8 @@ const transcript = document.getElementById('transcript');
 const findings = document.getElementById('findings');
 
 const delSet = new Set();
+let manualCuts = [];     // cortes manuales {s,e} hechos sobre la señal (tramos/silencios)
+let mcIn = null, mcOut = null;   // marcas in/out del corte manual en curso
 let undoStack = [];
 let wordEls = [];
 let cuts = [];           // rangos [s,e] fusionados que se SALTAN al reproducir
@@ -428,6 +507,7 @@ function rebuildCuts(){
   const raw=[];
   delSet.forEach(i=>raw.push(cutForWord(i)));
   gapSet.forEach(i=>raw.push(gapCutFor(i)));
+  manualCuts.forEach(c=>raw.push({s:c.s, e:c.e}));   // cortes manuales (tramos/silencios)
   raw.sort((p,q)=>p.s-q.s);
   cuts=[];
   for(const r of raw){
@@ -504,7 +584,10 @@ transcript.addEventListener('click',e=>{
   const p=e.target.closest('.pause');
   if(p){ const g=+p.dataset.gap; selectGap(g); vid.currentTime=Math.max(0,gapCutFor(g).s-0.4); return; }
   const wd=e.target.closest('.word');
-  if(wd){ const i=+wd.dataset.i; selectWord(i); vid.currentTime=WORDS[i].s; }
+  if(wd){ const i=+wd.dataset.i;
+    // SHIFT+click = cortar TODO el tramo entre la palabra seleccionada y esta (estilo CapCut)
+    if(e.shiftKey && selKind==='word' && selIdx>=0 && selIdx!==i){ deleteRange(selIdx,i); return; }
+    selectWord(i); vid.currentTime=WORDS[i].s; }
 });
 transcript.addEventListener('dblclick',e=>{
   e.preventDefault();
@@ -522,7 +605,7 @@ findings.addEventListener('click',e=>{
 
 // ---- deshacer por instantáneas (cubre marcar, marcar-todas, nudge, arrastrar) ----
 function snapshot(){
-  undoStack.push({d:[...delSet], c:JSON.stringify(customCut), g:[...gapSet], gc:JSON.stringify(gapCut)});
+  undoStack.push({d:[...delSet], c:JSON.stringify(customCut), g:[...gapSet], gc:JSON.stringify(gapCut), m:JSON.stringify(manualCuts)});
   if(undoStack.length>200) undoStack.shift();
 }
 function applyClasses(){
@@ -535,6 +618,7 @@ function undo(){
   gapSet.clear(); s.g.forEach(i=>gapSet.add(i));
   for(const k in customCut) delete customCut[k]; Object.assign(customCut, JSON.parse(s.c));
   for(const k in gapCut) delete gapCut[k]; Object.assign(gapCut, JSON.parse(s.gc));
+  if(s.m!==undefined) manualCuts = JSON.parse(s.m);
   applyClasses(); updateDelStats(); if(selIdx>=0) updateInspector();
 }
 function toggleDel(i){
@@ -543,15 +627,63 @@ function toggleDel(i){
   else{ delSet.add(i); wordEls[i].classList.add('del'); }
   updateDelStats();
 }
+// ---- cortar un TRAMO completo (split + borrar, estilo CapCut) ----
+// Marca todas las palabras entre a..b y las pausas internas -> un corte limpio.
+function deleteRange(a,b){
+  const lo=Math.min(a,b), hi=Math.max(a,b);
+  snapshot();
+  for(let i=lo;i<=hi;i++) delSet.add(i);
+  for(let i=lo+1;i<=hi;i++){ if(WORDS[i].g>=PAUSE_TH) gapSet.add(i); }  // pausas dentro del tramo
+  applyClasses(); updateDelStats();
+  clearSelHighlight(); selIdx=-1;
+  const segs=(hi-lo+1);
+  flash('✂️ Tramo cortado: '+segs+' palabra'+(segs>1?'s':''));
+}
+// ---- CORTE MANUAL sobre la señal (tramos/silencios no detectados) ----
+function fmtMs(t){ if(t==null)return '—'; const m=Math.floor(t/60),s=(t%60); return m+':'+(s<10?'0':'')+s.toFixed(2); }
+function mcRefresh(){
+  document.getElementById('mcIn').textContent=fmtMs(mcIn);
+  document.getElementById('mcOut').textContent=fmtMs(mcOut);
+  const ok=(mcIn!=null&&mcOut!=null&&mcOut>mcIn);
+  document.getElementById('mcDur').textContent=ok?('('+(mcOut-mcIn).toFixed(2)+'s)'):'';
+  document.getElementById('mcDelBtn').disabled=!ok;
+}
+function mcSetIn(){ mcIn=vid.currentTime; if(mcOut!=null&&mcOut<=mcIn)mcOut=null; mcRefresh(); flash('Inicio en '+fmtMs(mcIn)); }
+function mcSetOut(){ mcOut=vid.currentTime; if(mcIn!=null&&mcOut<=mcIn){flash('El fin debe ir después del inicio');mcOut=null;} mcRefresh(); if(mcOut!=null)flash('Fin en '+fmtMs(mcOut)); }
+function mcPreview(){ if(mcIn==null)return; vid.currentTime=Math.max(0,mcIn-0.3); vid.play(); }
+function mcDelete(){
+  if(mcIn==null||mcOut==null||mcOut<=mcIn)return;
+  snapshot();
+  manualCuts.push({s:+mcIn.toFixed(3), e:+mcOut.toFixed(3)});
+  flash('✂️ Tramo eliminado: '+fmtMs(mcIn)+' → '+fmtMs(mcOut));
+  mcIn=mcOut=null; mcRefresh();
+  document.getElementById('mcIn').textContent='—'; document.getElementById('mcOut').textContent='—';
+  updateDelStats();
+}
+function removeManualCut(idx){ snapshot(); manualCuts.splice(idx,1); updateDelStats(); }
+
+// aviso breve
+let _flashT=null;
+function flash(msg){
+  let el=document.getElementById('flashToast');
+  if(!el){ el=document.createElement('div'); el.id='flashToast';
+    el.style.cssText='position:fixed;bottom:70px;left:50%;transform:translateX(-50%);'+
+      'background:var(--accent);color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;'+
+      'font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:opacity .3s';
+    document.body.appendChild(el); }
+  el.textContent=msg; el.style.opacity='1';
+  clearTimeout(_flashT); _flashT=setTimeout(()=>{el.style.opacity='0';},1800);
+}
 function updateDelStats(){
   rebuildCuts();
-  document.getElementById('s-del').textContent=delSet.size+gapSet.size;
+  document.getElementById('s-del').textContent=delSet.size+gapSet.size+manualCuts.length;
   const t=cuts.reduce((a,c)=>a+(c.e-c.s),0);
   document.getElementById('s-time').textContent=t.toFixed(1)+'s';
   if(typeof refreshFindingMarks==='function') refreshFindingMarks();
   if(typeof renderRemovedList==='function') renderRemovedList();
   if(typeof renderPauseBuckets==='function') renderPauseBuckets();
   if(typeof drawWave==='function' && selIdx>=0) { updateInspector(); }
+  if(typeof tlReady!=='undefined' && tlReady){ tlRenderWave(); tlDraw(); }   // refrescar zonas rojas
 }
 // marcar/desmarcar por categoría
 function markCat(cat){
@@ -566,11 +698,12 @@ function unmarkAll(){
   delSet.clear(); updateDelStats();
 }
 function clearAll(){
-  if(!delSet.size)return;
+  if(!delSet.size && !gapSet.size && !manualCuts.length)return;
   if(confirm('¿Quitar todas las marcas de eliminación?')){
     snapshot();
     delSet.forEach(i=>wordEls[i].classList.remove('del'));
-    delSet.clear();updateDelStats();
+    delSet.clear(); gapSet.clear(); manualCuts=[];
+    applyClasses(); updateDelStats();
   }
 }
 
@@ -589,6 +722,7 @@ function tick(){
   const t=vid.currentTime;
   document.getElementById('clock').textContent=fmt(t);
   if(!vid.paused && selIdx>=0 && document.getElementById('inspector').style.display!=='none') drawWave();
+  if(tlReady && !vid.paused) tlDraw();   // mover playhead en la línea de tiempo
   // ---- SALTAR los trozos eliminados: empalme duro instantáneo (sin mute/transición) ----
   // c.s ya viene metido en el silencio previo, así que saltar justo ahí no deja oír nada.
   if(!vid.paused && cuts.length){
@@ -619,7 +753,9 @@ requestAnimationFrame(tick);
 
 vid.addEventListener('loadedmetadata',()=>{
   document.getElementById('dur').textContent='/ '+fmt(vid.duration);
+  tlInit();   // ya conocemos la duración -> ajustar la línea de tiempo
 });
+vid.addEventListener('seeked',()=>{ if(tlReady) tlDraw(); });
 document.getElementById('play').addEventListener('click',()=>vid.paused?vid.play():vid.pause());
 
 // ---- búsqueda ----
@@ -679,7 +815,133 @@ async function renderVideo(){
 
 // ============ INSPECTOR + WAVEFORM (palabras Y pausas) ============
 let PEAKS=null, PPS=100, selIdx=-1, selKind='word';
-fetch('peaks.json').then(r=>r.ok?r.json():null).then(j=>{ if(j){PEAKS=j.peaks;PPS=j.pps; if(selIdx>=0)drawWave();} }).catch(()=>{});
+fetch('peaks.json').then(r=>r.ok?r.json():null).then(j=>{ if(j){PEAKS=j.peaks;PPS=j.pps; if(selIdx>=0)drawWave(); tlInit();} }).catch(()=>{});
+
+// ===== LÍNEA DE TIEMPO GLOBAL (onda de todo el audio, zoom + selección) =====
+const tlc = document.getElementById('tlwave');
+const tlctx = tlc.getContext('2d');
+const tlCache = document.createElement('canvas');   // onda+cortes pre-renderizados
+const tlcc = tlCache.getContext('2d');
+const tlScrollEl = document.getElementById('tlScroll');
+const tlDPR = window.devicePixelRatio || 1;
+let tlZoom=0, tlBaseZoom=0, tlOffset=0;     // px/seg, zoom base, segundo en el borde izq
+let tlSelA=null, tlSelB=null;                // selección (segundos)
+let tlDragging=false, tlMoved=false, tlDownX=0, tlDownT=0;
+let tlReady=false;
+
+function tlDur(){ return (vid.duration&&isFinite(vid.duration))?vid.duration:(PEAKS?PEAKS.length/PPS:0); }
+function tlViewSec(){ return tlc.clientWidth/tlZoom; }
+function tlX(t){ return (t-tlOffset)*tlZoom; }
+function tlT(x){ return tlOffset + x/tlZoom; }
+function tlFmt(t){ const m=Math.floor(t/60),s=Math.floor(t%60); return m+':'+(s<10?'0':'')+s; }
+
+function tlInit(){
+  if(!PEAKS || tlDur()<=0) return;
+  const W=tlc.clientWidth, H=84;
+  tlc.width=Math.round(W*tlDPR); tlc.height=Math.round(H*tlDPR);
+  tlctx.setTransform(tlDPR,0,0,tlDPR,0,0);
+  tlBaseZoom = W/tlDur();
+  if(!tlZoom) tlZoom=tlBaseZoom;
+  tlReady=true;
+  tlClamp(); tlRenderWave(); tlUpdateBar(); tlDraw();
+}
+function tlClamp(){
+  const maxOff=Math.max(0,tlDur()-tlViewSec());
+  tlOffset=Math.max(0,Math.min(maxOff,tlOffset));
+}
+function tlUpdateBar(){
+  const maxOff=Math.max(0,tlDur()-tlViewSec());
+  if(maxOff<=0.01) tlScrollEl.classList.add('hidden');
+  else{ tlScrollEl.classList.remove('hidden'); tlScrollEl.value=Math.round(tlOffset/maxOff*1000); }
+  const z=tlZoom/tlBaseZoom;
+  document.getElementById('tlZoomLbl').textContent=(z<10?z.toFixed(1):Math.round(z))+'x';
+}
+function tlNiceStep(v){ for(const s of [1,2,5,10,15,30,60,120,300,600]) if(v/s<=12) return s; return 1200; }
+
+// dibuja onda + zonas de corte + marcas de tiempo en el canvas-caché
+function tlRenderWave(){
+  if(!PEAKS) return;
+  const W=tlc.clientWidth, H=84;
+  tlCache.width=Math.round(W*tlDPR); tlCache.height=Math.round(H*tlDPR);
+  tlcc.setTransform(tlDPR,0,0,tlDPR,0,0);
+  tlcc.clearRect(0,0,W,H);
+  const mid=H/2+4;
+  for(let px=0;px<W;px++){
+    const i0=Math.max(0,Math.floor(tlT(px)*PPS)), i1=Math.min(PEAKS.length-1,Math.floor(tlT(px+1)*PPS));
+    let peak=0; for(let i=i0;i<=i1;i++){ const v=PEAKS[i]||0; if(v>peak)peak=v; }
+    const h=peak*(H*0.78);
+    const t0=tlT(px), inCut=cuts.some(c=>t0>=c.s&&t0<c.e);
+    tlcc.fillStyle=inCut?'rgba(239,68,68,0.9)':'#566489';
+    tlcc.fillRect(px,mid-h/2,1,Math.max(1,h));
+  }
+  // marcas de tiempo
+  tlcc.fillStyle='rgba(180,180,196,0.45)'; tlcc.font='9px -apple-system,sans-serif';
+  const step=tlNiceStep(tlViewSec()), first=Math.ceil(tlOffset/step)*step;
+  for(let t=first;t<tlOffset+tlViewSec();t+=step){ const x=tlX(t); tlcc.fillRect(x,0,1,4); tlcc.fillText(tlFmt(t),x+3,9); }
+}
+// dibuja: caché + selección + playhead (barato, se llama cada frame)
+function tlDraw(){
+  if(!tlReady) return;
+  const W=tlc.clientWidth, H=84;
+  tlctx.clearRect(0,0,W,H);
+  tlctx.drawImage(tlCache,0,0,W,H);
+  if(tlSelA!=null&&tlSelB!=null){
+    const a=Math.min(tlSelA,tlSelB), b=Math.max(tlSelA,tlSelB), xa=tlX(a), xb=tlX(b);
+    tlctx.fillStyle='rgba(99,102,241,0.28)'; tlctx.fillRect(xa,0,xb-xa,H);
+    tlctx.fillStyle='#6366f1'; tlctx.fillRect(xa,0,1.5,H); tlctx.fillRect(xb-1.5,0,1.5,H);
+  }
+  const ph=tlX(vid.currentTime);
+  if(ph>=-1&&ph<=W+1){ tlctx.fillStyle='#fff'; tlctx.fillRect(ph-0.75,0,1.5,H); }
+}
+function tlZoomTo(z, centerT){
+  tlZoom=Math.max(tlBaseZoom, Math.min(tlBaseZoom*500, z));
+  tlOffset=centerT - tlc.clientWidth/2/tlZoom;
+  tlClamp(); tlRenderWave(); tlUpdateBar(); tlDraw();
+}
+function tlZoomBy(f){ if(tlBaseZoom) tlZoomTo(tlZoom*f, tlOffset+tlViewSec()/2); }
+function tlSelInfo(){
+  const has=tlSelA!=null&&tlSelB!=null&&Math.abs(tlSelB-tlSelA)>0.05;
+  document.getElementById('tlDelBtn').disabled=!has;
+  document.getElementById('tlSelInfo').textContent=has?
+    (tlFmt(Math.min(tlSelA,tlSelB))+' → '+tlFmt(Math.max(tlSelA,tlSelB))+'  ('+Math.abs(tlSelB-tlSelA).toFixed(1)+'s)'):'';
+}
+function tlDeleteSelection(){
+  if(tlSelA==null||tlSelB==null) return;
+  const a=Math.min(tlSelA,tlSelB), b=Math.max(tlSelA,tlSelB);
+  if(b-a<0.05) return;
+  snapshot(); manualCuts.push({s:+a.toFixed(3),e:+b.toFixed(3)});
+  flash('✂️ Tramo eliminado: '+tlFmt(a)+' → '+tlFmt(b));
+  tlSelA=tlSelB=null; tlSelInfo(); updateDelStats();
+}
+function tlClearSelection(){ tlSelA=tlSelB=null; tlSelInfo(); tlDraw(); }
+
+tlScrollEl.addEventListener('input',()=>{
+  const maxOff=Math.max(0,tlDur()-tlViewSec());
+  tlOffset=(tlScrollEl.value/1000)*maxOff; tlRenderWave(); tlDraw();
+});
+tlc.addEventListener('mousedown',e=>{
+  tlDragging=true; tlMoved=false; tlDownX=e.offsetX; tlDownT=tlT(e.offsetX);
+  tlSelA=tlDownT; tlSelB=tlDownT;
+});
+window.addEventListener('mousemove',e=>{
+  if(!tlDragging) return;
+  const r=tlc.getBoundingClientRect(); let x=Math.max(0,Math.min(tlc.clientWidth,e.clientX-r.left));
+  if(Math.abs(x-tlDownX)>3) tlMoved=true;
+  tlSelB=tlT(x); tlSelInfo(); tlDraw();
+});
+window.addEventListener('mouseup',()=>{
+  if(!tlDragging) return; tlDragging=false;
+  if(!tlMoved){ vid.currentTime=Math.max(0,tlDownT); tlSelA=tlSelB=null; tlSelInfo(); }
+  tlDraw();
+});
+tlc.addEventListener('wheel',e=>{
+  e.preventDefault(); if(!tlBaseZoom) return;
+  const tAt=tlT(e.offsetX), f=e.deltaY<0?1.2:1/1.2;
+  tlZoom=Math.max(tlBaseZoom,Math.min(tlBaseZoom*500,tlZoom*f));
+  tlOffset=tAt-e.offsetX/tlZoom; tlClamp(); tlRenderWave(); tlUpdateBar(); tlDraw();
+},{passive:false});
+let _tlrz=null;
+window.addEventListener('resize',()=>{ clearTimeout(_tlrz); _tlrz=setTimeout(tlInit,150); });
 const wave=document.getElementById('wave'); const wctx=wave.getContext('2d');
 let viewS=0, viewE=1;
 function normw(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,''); }
@@ -804,6 +1066,7 @@ const removedList=document.getElementById('removedList');
 function renderRemovedList(){
   const items=[...delSet].map(i=>({k:'word',i,c:cutForWord(i),label:WORDS[i].w}))
     .concat([...gapSet].map(i=>({k:'gap',i,c:gapCutFor(i),label:'⏸ pausa'})))
+    .concat(manualCuts.map((c,idx)=>({k:'man',i:idx,c:c,label:'✂️ tramo '+(c.e-c.s).toFixed(1)+'s'})))
     .sort((a,b)=>a.c.s-b.c.s);
   document.getElementById('rmCount').textContent=items.length;
   removedList.innerHTML=items.map(it=>
@@ -813,9 +1076,15 @@ function renderRemovedList(){
 }
 removedList.addEventListener('click',e=>{
   const r=e.target.closest('.rm'); if(!r)return;
-  const i=+r.dataset.i, gap=r.dataset.k==='gap';
-  if(e.target.closest('.x')){ gap?toggleGapDel(i):toggleDel(i); return; }
-  gap?selectGap(i):selectWord(i); vid.currentTime=parseFloat(r.dataset.seek);
+  const i=+r.dataset.i, k=r.dataset.k;
+  if(e.target.closest('.x')){
+    if(k==='man') removeManualCut(i);
+    else if(k==='gap') toggleGapDel(i);
+    else toggleDel(i);
+    return;
+  }
+  if(k==='man'){ vid.currentTime=parseFloat(r.dataset.seek); return; }
+  k==='gap'?selectGap(i):selectWord(i); vid.currentTime=parseFloat(r.dataset.seek);
 });
 
 // ---- auto-marcar muletillas vocalizadas (eh, em, mmm, ah, o sea) al cargar ----
@@ -825,6 +1094,7 @@ function autoMarkFillers(){
   WORDS.forEach((w,i)=>{ if(w.f && !delSet.has(i)){ delSet.add(i); wordEls[i].classList.add('del'); } });
   updateDelStats();
 }
+mcRefresh();
 if(document.getElementById('autoEh').checked) autoMarkFillers();
 document.getElementById('autoEh').addEventListener('change',e=>{
   if(e.target.checked) autoMarkFillers();

@@ -1,3 +1,6 @@
 # Editor de Muletillas — dependencias Python
 # (ffmpeg debe estar instalado en el sistema: `brew install ffmpeg`)
 stable-ts>=2.19.0
+# faster-whisper: transcribe el audio para localizar la porción de Descript
+# que corresponde a cada segmento (paso de "anclaje" en match_descript.py)
+faster-whisper>=1.2.0
